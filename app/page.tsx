@@ -367,27 +367,6 @@ function normalizeCustomerProfile(value: unknown, fallback: CustomerProfile): Cu
     fallbackName: typeof profile.fallbackName === "string" ? profile.fallbackName : fallback.fallbackName,
     fallbackBirthYear: typeof profile.fallbackBirthYear === "string" ? profile.fallbackBirthYear : fallback.fallbackBirthYear
   };
-  const legacy = legacyDefaultProfileValues[normalized.id];
-  if (
-    legacy &&
-    normalized.name === legacy.name &&
-    normalized.gender === legacy.gender &&
-    normalized.birthYear === legacy.birthYear &&
-    normalized.age === legacy.age &&
-    normalized.job === legacy.job
-  ) {
-    return {
-      ...normalized,
-      name: "",
-      gender: "",
-      birthYear: "",
-      age: "",
-      job: "",
-      fallbackName: legacy.fallbackName,
-      fallbackBirthYear: legacy.fallbackBirthYear
-    };
-  }
-
   return normalized;
 }
 
