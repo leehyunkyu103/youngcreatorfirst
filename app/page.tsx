@@ -9,11 +9,12 @@ import {
   PieChart,
   ShieldCheck,
   Sparkles,
+  Trash2,
   WalletCards
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type DragEvent, useEffect, useMemo, useState } from "react";
 
-type CustomerId = "kim" | "park" | "lee";
+type CustomerId = string;
 
 type FinancialInfo = {
   totalAssets: string;
@@ -164,6 +165,17 @@ type AppState = {
 
 type WorkspaceTab = "profile" | "existing" | "create" | "compare";
 
+type CustomerProfile = {
+  id: CustomerId;
+  name: string;
+  gender: string;
+  birthYear: string;
+  age: string;
+  job: string;
+  fallbackName?: string;
+  fallbackBirthYear?: string;
+};
+
 const workspaceTabs: { id: WorkspaceTab; label: string; description: string }[] = [
   { id: "profile", label: "고객 성향 분석", description: "재무 정보와 RRTTLLU 입력" },
   { id: "existing", label: "기존 포트폴리오 분석", description: "보유 자산과 제약 확인" },
@@ -171,13 +183,70 @@ const workspaceTabs: { id: WorkspaceTab; label: string; description: string }[] 
   { id: "compare", label: "포트폴리오 비교", description: "기존안과 신규안 비교" }
 ];
 
-const customerProfiles: { id: CustomerId; label: string }[] = [
-  { id: "kim", label: "김준호 (1991)" },
-  { id: "park", label: "박서현 (1978)" },
-  { id: "lee", label: "이재형 (1961)" }
+const defaultCustomerProfiles: CustomerProfile[] = [
+  {
+    id: "kim",
+    name: "",
+    gender: "",
+    birthYear: "",
+    age: "",
+    job: "",
+    fallbackName: "김준호",
+    fallbackBirthYear: "1991"
+  },
+  {
+    id: "park",
+    name: "",
+    gender: "",
+    birthYear: "",
+    age: "",
+    job: "",
+    fallbackName: "박서현",
+    fallbackBirthYear: "1978"
+  },
+  {
+    id: "lee",
+    name: "",
+    gender: "",
+    birthYear: "",
+    age: "",
+    job: "",
+    fallbackName: "이재형",
+    fallbackBirthYear: "1961"
+  }
 ];
 
 const storageKey = "samsung-vvip-advisor-customer-data-v1";
+
+const legacyDefaultProfileValues: Record<string, Omit<CustomerProfile, "id">> = {
+  kim: {
+    name: "김준호",
+    gender: "남",
+    birthYear: "1991",
+    age: "35",
+    job: "삼성전자 임직원 (전략기획실)",
+    fallbackName: "김준호",
+    fallbackBirthYear: "1991"
+  },
+  park: {
+    name: "박서현",
+    gender: "여",
+    birthYear: "1978",
+    age: "48",
+    job: "바이오헬스케어 기업 대표",
+    fallbackName: "박서현",
+    fallbackBirthYear: "1978"
+  },
+  lee: {
+    name: "이재형",
+    gender: "남",
+    birthYear: "1961",
+    age: "65",
+    job: "제조업 창업주 (회장)",
+    fallbackName: "이재형",
+    fallbackBirthYear: "1961"
+  }
+};
 
 const initialState: AppState = {
   financial: {
@@ -231,12 +300,28 @@ function createInitialState(): AppState {
   };
 }
 
-function createInitialCustomerData(): Record<CustomerId, AppState> {
+function createInitialCustomerData(profiles = defaultCustomerProfiles): Record<CustomerId, AppState> {
+  return Object.fromEntries(profiles.map((profile) => [profile.id, createInitialState()])) as Record<CustomerId, AppState>;
+}
+
+function createNewCustomerProfile(): CustomerProfile {
   return {
-    kim: createInitialState(),
-    park: createInitialState(),
-    lee: createInitialState()
+    id: `customer-${Date.now()}`,
+    name: "",
+    gender: "",
+    birthYear: "",
+    age: "",
+    job: "",
+    fallbackName: "신규 고객"
   };
+}
+
+function customerTabLabel(profile: CustomerProfile) {
+  const enteredName = profile.name.trim();
+  const name = enteredName ? enteredName : "신규 고객";
+  const birthYear = profile.birthYear.trim();
+  const year = birthYear || "xxxx";
+  return `${name} (${year})`;
 }
 
 function normalizeAppState(value: unknown): AppState {
@@ -265,19 +350,66 @@ function normalizeAppState(value: unknown): AppState {
   };
 }
 
-function normalizeCustomerData(value: unknown): Record<CustomerId, AppState> {
-  const defaults = createInitialCustomerData();
-  const data = value && typeof value === "object" ? (value as Partial<Record<CustomerId, AppState>>) : {};
-
-  return {
-    kim: normalizeAppState(data.kim ?? defaults.kim),
-    park: normalizeAppState(data.park ?? defaults.park),
-    lee: normalizeAppState(data.lee ?? defaults.lee)
+function normalizeCustomerProfile(value: unknown, fallback: CustomerProfile): CustomerProfile {
+  const profile = value && typeof value === "object" ? (value as Partial<CustomerProfile>) : {};
+  const normalizeProfileText = (text: unknown, fallbackText: string) => {
+    const value = typeof text === "string" ? text : fallbackText;
+    return value === "입력 대기" ? "" : value;
   };
+  const normalizeProfileName = (text: unknown, fallbackText: string, id: string) => {
+    const value = normalizeProfileText(text, fallbackText);
+    return value === "신규 고객" ? "" : value;
+  };
+  const id = typeof profile.id === "string" && profile.id ? profile.id : fallback.id;
+  const normalized = {
+    id,
+    name: normalizeProfileName(profile.name, fallback.name, id),
+    gender: normalizeProfileText(profile.gender, fallback.gender),
+    birthYear: normalizeProfileText(profile.birthYear, fallback.birthYear),
+    age: normalizeProfileText(profile.age, fallback.age),
+    job: normalizeProfileText(profile.job, fallback.job),
+    fallbackName: typeof profile.fallbackName === "string" ? profile.fallbackName : fallback.fallbackName,
+    fallbackBirthYear: typeof profile.fallbackBirthYear === "string" ? profile.fallbackBirthYear : fallback.fallbackBirthYear
+  };
+  const legacy = legacyDefaultProfileValues[normalized.id];
+  if (
+    legacy &&
+    normalized.name === legacy.name &&
+    normalized.gender === legacy.gender &&
+    normalized.birthYear === legacy.birthYear &&
+    normalized.age === legacy.age &&
+    normalized.job === legacy.job
+  ) {
+    return {
+      ...normalized,
+      name: "",
+      gender: "",
+      birthYear: "",
+      age: "",
+      job: "",
+      fallbackName: legacy.fallbackName,
+      fallbackBirthYear: legacy.fallbackBirthYear
+    };
+  }
+
+  return normalized;
 }
 
-function isCustomerId(value: unknown): value is CustomerId {
-  return value === "kim" || value === "park" || value === "lee";
+function normalizeCustomerProfiles(value: unknown): CustomerProfile[] {
+  if (!Array.isArray(value)) return defaultCustomerProfiles;
+  const normalized = value
+    .map((profile, index) => normalizeCustomerProfile(profile, defaultCustomerProfiles[index] ?? createNewCustomerProfile()))
+    .filter((profile, index, profiles) => profile.id && profiles.findIndex((item) => item.id === profile.id) === index);
+  return normalized.length ? normalized : defaultCustomerProfiles;
+}
+
+function normalizeCustomerData(value: unknown, profiles: CustomerProfile[]): Record<CustomerId, AppState> {
+  const data = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return Object.fromEntries(profiles.map((profile) => [profile.id, normalizeAppState(data[profile.id])])) as Record<CustomerId, AppState>;
+}
+
+function isCustomerId(value: unknown, profiles: CustomerProfile[]): value is CustomerId {
+  return typeof value === "string" && profiles.some((profile) => profile.id === value);
 }
 
 function loadStoredCustomerState() {
@@ -286,20 +418,22 @@ function loadStoredCustomerState() {
   try {
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { customerData?: unknown; selectedCustomer?: unknown };
+    const parsed = JSON.parse(raw) as { customerProfiles?: unknown; customerData?: unknown; selectedCustomer?: unknown };
+    const customerProfiles = normalizeCustomerProfiles(parsed.customerProfiles);
 
     return {
-      customerData: normalizeCustomerData(parsed.customerData),
-      selectedCustomer: isCustomerId(parsed.selectedCustomer) ? parsed.selectedCustomer : "kim"
+      customerProfiles,
+      customerData: normalizeCustomerData(parsed.customerData, customerProfiles),
+      selectedCustomer: isCustomerId(parsed.selectedCustomer, customerProfiles) ? parsed.selectedCustomer : customerProfiles[0].id
     };
   } catch {
     return null;
   }
 }
 
-function saveStoredCustomerState(customerData: Record<CustomerId, AppState>, selectedCustomer: CustomerId) {
+function saveStoredCustomerState(customerProfiles: CustomerProfile[], customerData: Record<CustomerId, AppState>, selectedCustomer: CustomerId) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(storageKey, JSON.stringify({ customerData, selectedCustomer }));
+  window.localStorage.setItem(storageKey, JSON.stringify({ customerProfiles, customerData, selectedCustomer }));
 }
 
 const noneExperience = "금융상품에 투자해 본 경험 없음";
@@ -357,20 +491,26 @@ const riskInterpretations: Record<RiskLevel, string> = {
 };
 
 export default function Home() {
-  const [customerData, setCustomerData] = useState<Record<CustomerId, AppState>>(createInitialCustomerData);
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerId>("kim");
+  const [customerProfiles, setCustomerProfiles] = useState<CustomerProfile[]>(defaultCustomerProfiles);
+  const [customerData, setCustomerData] = useState<Record<CustomerId, AppState>>(() => createInitialCustomerData(defaultCustomerProfiles));
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerId>(defaultCustomerProfiles[0].id);
   const [showCustomerTabs, setShowCustomerTabs] = useState(false);
+  const [draggedCustomerId, setDraggedCustomerId] = useState<CustomerId | null>(null);
+  const [customerDropIndex, setCustomerDropIndex] = useState<number | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("profile");
   const [storageReady, setStorageReady] = useState(false);
   const [analysisRequested, setAnalysisRequested] = useState(false);
   const [confirmedRiskResult, setConfirmedRiskResult] = useState<RiskResult | null>(null);
   const [lastAnalysisSnapshot, setLastAnalysisSnapshot] = useState<StructuredJsonPayload | null>(null);
   const [changeHistory, setChangeHistory] = useState<ChangeEntry[]>([]);
-  const formData = customerData[selectedCustomer];
+  const formData = customerData[selectedCustomer] ?? createInitialState();
+  const selectedCustomerProfile = customerProfiles.find((customer) => customer.id === selectedCustomer) ?? customerProfiles[0];
 
   useEffect(() => {
     const storedState = loadStoredCustomerState();
     if (storedState) {
+      setCustomerProfiles(storedState.customerProfiles);
       setCustomerData(storedState.customerData);
       setSelectedCustomer(storedState.selectedCustomer);
     }
@@ -379,8 +519,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!storageReady) return;
-    saveStoredCustomerState(customerData, selectedCustomer);
-  }, [customerData, selectedCustomer, storageReady]);
+    saveStoredCustomerState(customerProfiles, customerData, selectedCustomer);
+  }, [customerProfiles, customerData, selectedCustomer, storageReady]);
 
   const riskResult = useMemo(() => calculateRiskResult(formData.rrttllu), [formData.rrttllu]);
 
@@ -429,8 +569,8 @@ export default function Home() {
   }, [formData.rrttllu]);
 
   const internalJsonPayload = useMemo(
-    () => buildStructuredJsonPayload(formData, confirmedRiskResult ?? riskResult),
-    [confirmedRiskResult, formData, riskResult]
+    () => buildStructuredJsonPayload(formData, confirmedRiskResult ?? riskResult, selectedCustomerProfile),
+    [confirmedRiskResult, formData, riskResult, selectedCustomerProfile]
   );
 
   const warnings = internalJsonPayload.rrttllu.warnings;
@@ -439,13 +579,12 @@ export default function Home() {
   const setFormData = (updater: (current: AppState) => AppState) => {
     setCustomerData((prev) => ({
       ...prev,
-      [selectedCustomer]: updater(prev[selectedCustomer])
+      [selectedCustomer]: updater(prev[selectedCustomer] ?? createInitialState())
     }));
   };
 
   const selectCustomer = (customerId: CustomerId) => {
     setSelectedCustomer(customerId);
-    setShowCustomerTabs(false);
     setAnalysisRequested(false);
     setConfirmedRiskResult(null);
     setLastAnalysisSnapshot(null);
@@ -453,14 +592,69 @@ export default function Home() {
   };
 
   const resetSelectedCustomer = () => {
-    setCustomerData((prev) => ({
-      ...prev,
-      [selectedCustomer]: createInitialState()
-    }));
+    const resetCurrent = window.confirm("현재 고객만 초기화하시겠습니까?");
+    if (resetCurrent) {
+      setCustomerData((prev) => ({
+        ...prev,
+        [selectedCustomer]: createInitialState()
+      }));
+    } else {
+      const resetAll = window.confirm("전체 고객을 초기화하시겠습니까?");
+      if (!resetAll) return;
+      setCustomerData(createInitialCustomerData(customerProfiles));
+      setSelectedCustomer(customerProfiles[0]?.id ?? defaultCustomerProfiles[0].id);
+    }
     setAnalysisRequested(false);
     setConfirmedRiskResult(null);
     setLastAnalysisSnapshot(null);
     setChangeHistory([]);
+  };
+
+  const addCustomer = () => {
+    const profile = createNewCustomerProfile();
+    setCustomerProfiles((prev) => [...prev, profile]);
+    setCustomerData((prev) => ({ ...prev, [profile.id]: createInitialState() }));
+    selectCustomer(profile.id);
+  };
+
+  const reorderCustomer = (dropIndex: number) => {
+    if (!draggedCustomerId) return;
+    setCustomerProfiles((prev) => {
+      const sourceIndex = prev.findIndex((profile) => profile.id === draggedCustomerId);
+      if (sourceIndex < 0) return prev;
+
+      const next = [...prev];
+      const [moved] = next.splice(sourceIndex, 1);
+      const adjustedDropIndex = sourceIndex < dropIndex ? dropIndex - 1 : dropIndex;
+      next.splice(Math.max(0, Math.min(adjustedDropIndex, next.length)), 0, moved);
+      return next;
+    });
+    setDraggedCustomerId(null);
+    setCustomerDropIndex(null);
+  };
+
+  const deleteSelectedCustomer = () => {
+    const remainingProfiles = customerProfiles.filter((profile) => profile.id !== selectedCustomer);
+    const nextProfiles = remainingProfiles.length ? remainingProfiles : [createNewCustomerProfile()];
+    const nextSelectedCustomer = nextProfiles[0].id;
+
+    setCustomerProfiles(nextProfiles);
+    setCustomerData((prev) => {
+      const nextData = { ...prev };
+      delete nextData[selectedCustomer];
+      if (!nextData[nextSelectedCustomer]) {
+        nextData[nextSelectedCustomer] = createInitialState();
+      }
+      return nextData;
+    });
+    selectCustomer(nextSelectedCustomer);
+    setDeleteConfirmOpen(false);
+  };
+
+  const updateCustomerProfile = (key: keyof Omit<CustomerProfile, "id">, value: string) => {
+    setCustomerProfiles((prev) =>
+      prev.map((profile) => (profile.id === selectedCustomer ? { ...profile, [key]: value } : profile))
+    );
   };
 
   const setFinancial = (key: keyof FinancialInfo, value: string) => {
@@ -566,10 +760,18 @@ export default function Home() {
     <main className="min-h-screen px-5 py-6 text-ink lg:px-8">
       <div className="mx-auto flex max-w-[1680px] flex-col gap-5">
         <CustomerSelector
+          customers={customerProfiles}
           selectedCustomer={selectedCustomer}
           showCustomers={showCustomerTabs}
           onToggleSearch={() => setShowCustomerTabs((prev) => !prev)}
           onSelectCustomer={selectCustomer}
+          onAddCustomer={addCustomer}
+          onRequestDelete={() => setDeleteConfirmOpen(true)}
+          onDragStartCustomer={setDraggedCustomerId}
+          draggedCustomerId={draggedCustomerId}
+          dropIndex={customerDropIndex}
+          onSetDropIndex={setCustomerDropIndex}
+          onDropCustomer={reorderCustomer}
         />
         <div className="flex flex-col gap-5 xl:flex-row">
           <TabStrip activeTab={activeTab} onChange={setActiveTab} />
@@ -595,6 +797,7 @@ export default function Home() {
         {activeTab === "profile" ? (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.18fr)_minmax(430px,0.82fr)]">
           <section className="space-y-5">
+            <CustomerInfoCard profile={selectedCustomerProfile} onChange={updateCustomerProfile} />
             <Panel
               icon={<WalletCards size={18} />}
               eyebrow="기본 재무 정보"
@@ -834,56 +1037,242 @@ export default function Home() {
       </section>
         </div>
       </div>
+      {deleteConfirmOpen ? (
+        <DeleteCustomerDialog
+          customerLabel={selectedCustomerProfile ? customerTabLabel(selectedCustomerProfile) : "현재 고객"}
+          onCancel={() => setDeleteConfirmOpen(false)}
+          onDelete={deleteSelectedCustomer}
+        />
+      ) : null}
     </main>
   );
 }
 
 function CustomerSelector({
+  customers,
   selectedCustomer,
   showCustomers,
   onToggleSearch,
-  onSelectCustomer
+  onSelectCustomer,
+  onAddCustomer,
+  onRequestDelete,
+  onDragStartCustomer,
+  draggedCustomerId,
+  dropIndex,
+  onSetDropIndex,
+  onDropCustomer
 }: {
+  customers: CustomerProfile[];
   selectedCustomer: CustomerId;
   showCustomers: boolean;
   onToggleSearch: () => void;
   onSelectCustomer: (customerId: CustomerId) => void;
+  onAddCustomer: () => void;
+  onRequestDelete: () => void;
+  onDragStartCustomer: (customerId: CustomerId | null) => void;
+  draggedCustomerId: CustomerId | null;
+  dropIndex: number | null;
+  onSetDropIndex: (index: number | null) => void;
+  onDropCustomer: (index: number) => void;
 }) {
-  const currentCustomer = customerProfiles.find((customer) => customer.id === selectedCustomer)?.label;
+  const currentCustomer = customers.find((customer) => customer.id === selectedCustomer);
+  const [isDraggingTab, setIsDraggingTab] = useState(false);
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-soft">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <button
-          type="button"
-          onClick={onToggleSearch}
-          className={`min-h-11 rounded-lg px-4 py-2 text-left text-sm font-bold transition ${
-            showCustomers ? "bg-[#2f2f9d] text-white" : "bg-slate-50 text-navy hover:bg-slate-100"
-          }`}
-        >
-          고객명 검색
-        </button>
-        <p className="text-sm font-bold text-slate-600">현재 상담 고객: <span className="text-samsung">{currentCustomer}</span></p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onToggleSearch}
+            className={`min-h-11 rounded-lg px-4 py-2 text-left text-sm font-bold transition ${
+              showCustomers ? "bg-[#2f2f9d] text-white" : "bg-slate-50 text-navy hover:bg-slate-100"
+            }`}
+          >
+            고객명 검색
+          </button>
+          <button
+            type="button"
+            onClick={onAddCustomer}
+            className="min-h-11 rounded-lg bg-samsung px-4 py-2 text-left text-sm font-bold text-white transition hover:bg-[#1b35bd]"
+          >
+            고객 추가
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-bold text-slate-600">현재 상담 고객: <span className="text-samsung">{currentCustomer ? customerTabLabel(currentCustomer) : "선택 대기"}</span></p>
+          <button
+            type="button"
+            onClick={onRequestDelete}
+            aria-label="현재 고객 삭제"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition hover:border-red-300 hover:bg-red-100"
+          >
+            <Trash2 size={17} />
+          </button>
+        </div>
       </div>
       {showCustomers ? (
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          {customerProfiles.map((customer) => (
-            <button
+        <div
+          className="mt-3 flex items-stretch overflow-x-auto pb-1"
+          onDragLeave={(event) => {
+            if (event.currentTarget === event.target) onSetDropIndex(null);
+          }}
+        >
+          {customers.map((customer, index) => (
+            <CustomerTabDragItem
               key={customer.id}
-              type="button"
-              onClick={() => onSelectCustomer(customer.id)}
-              className={`min-h-11 rounded-lg border px-4 py-2 text-sm font-bold transition ${
-                selectedCustomer === customer.id
-                  ? "border-samsung bg-blue-50 text-samsung"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-              }`}
-            >
-              {customer.label}
-            </button>
+              customer={customer}
+              index={index}
+              selected={selectedCustomer === customer.id}
+              dragging={draggedCustomerId === customer.id}
+              dropBefore={dropIndex === index}
+              onSelect={() => {
+                if (!isDraggingTab) onSelectCustomer(customer.id);
+              }}
+              onDragStart={(event) => {
+                setIsDraggingTab(true);
+                onDragStartCustomer(customer.id);
+                onSetDropIndex(index);
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", customer.id);
+              }}
+              onDragOverIndex={onSetDropIndex}
+              onDropIndex={onDropCustomer}
+              onDragEnd={() => {
+                onDragStartCustomer(null);
+                onSetDropIndex(null);
+                window.setTimeout(() => setIsDraggingTab(false), 0);
+              }}
+            />
           ))}
+          <CustomerDropIndicator
+            index={customers.length}
+            active={dropIndex === customers.length}
+            onDragOverIndex={onSetDropIndex}
+            onDropIndex={onDropCustomer}
+          />
         </div>
       ) : null}
     </section>
+  );
+}
+
+function CustomerTabDragItem({
+  customer,
+  index,
+  selected,
+  dragging,
+  dropBefore,
+  onSelect,
+  onDragStart,
+  onDragOverIndex,
+  onDropIndex,
+  onDragEnd
+}: {
+  customer: CustomerProfile;
+  index: number;
+  selected: boolean;
+  dragging: boolean;
+  dropBefore: boolean;
+  onSelect: () => void;
+  onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
+  onDragOverIndex: (index: number | null) => void;
+  onDropIndex: (index: number) => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-stretch">
+      <CustomerDropIndicator index={index} active={dropBefore} onDragOverIndex={onDragOverIndex} onDropIndex={onDropIndex} />
+      <button
+        type="button"
+        draggable
+        onClick={onSelect}
+        onDragStart={onDragStart}
+        onDragOver={(event) => {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          const nextIndex = event.clientX < rect.left + rect.width / 2 ? index : index + 1;
+          onDragOverIndex(nextIndex);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          const nextIndex = event.clientX < rect.left + rect.width / 2 ? index : index + 1;
+          onDropIndex(nextIndex);
+        }}
+        onDragEnd={onDragEnd}
+        className={`min-h-11 shrink-0 rounded-lg border px-4 py-2 text-sm font-bold transition ${
+          selected ? "border-samsung bg-blue-50 text-samsung" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+        } ${dragging ? "opacity-45" : "opacity-100"}`}
+      >
+        {customerTabLabel(customer)}
+      </button>
+    </div>
+  );
+}
+
+function CustomerDropIndicator({
+  index,
+  active,
+  onDragOverIndex,
+  onDropIndex
+}: {
+  index: number;
+  active: boolean;
+  onDragOverIndex: (index: number | null) => void;
+  onDropIndex: (index: number) => void;
+}) {
+  return (
+    <div
+      className="flex w-3 shrink-0 items-center justify-center"
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        onDragOverIndex(index);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDropIndex(index);
+      }}
+    >
+      <span className={`h-9 w-0.5 rounded-full transition ${active ? "bg-samsung opacity-100" : "bg-transparent opacity-0"}`} />
+    </div>
+  );
+}
+
+function DeleteCustomerDialog({ customerLabel, onCancel, onDelete }: { customerLabel: string; onCancel: () => void; onDelete: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <section className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-700">
+            <Trash2 size={20} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-navy">고객 정보 삭제</h2>
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+              {customerLabel} 고객 정보가 모두 사라집니다. 정말 삭제하시겠습니까?
+            </p>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="min-h-11 rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700"
+          >
+            삭제
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -934,6 +1323,36 @@ function TabStrip({ activeTab, onChange }: { activeTab: WorkspaceTab; onChange: 
         </button>
       ))}
     </nav>
+  );
+}
+
+function CustomerInfoCard({ profile, onChange }: { profile: CustomerProfile; onChange: (key: keyof Omit<CustomerProfile, "id">, value: string) => void }) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-soft">
+      <div className="flex flex-wrap items-end gap-3">
+        <EditableProfileField label="성명" value={profile.name} onChange={(value) => onChange("name", value)} />
+        <EditableProfileField label="성별" value={profile.gender} onChange={(value) => onChange("gender", value)} />
+        <div className="flex flex-wrap gap-2">
+          <EditableProfileField label="출생연도" value={profile.birthYear} placeholder="입력 대기" onChange={(value) => onChange("birthYear", value)} />
+          <EditableProfileField label="만 나이" value={profile.age} placeholder="입력 대기" onChange={(value) => onChange("age", value)} />
+        </div>
+        <EditableProfileField label="직업" value={profile.job} widthClassName="w-80 max-w-full" onChange={(value) => onChange("job", value)} />
+      </div>
+    </section>
+  );
+}
+
+function EditableProfileField({ label, value, placeholder, widthClassName = "w-32", onChange }: { label: string; value: string; placeholder?: string; widthClassName?: string; onChange: (value: string) => void }) {
+  return (
+    <label className={`block ${widthClassName}`}>
+      <span className="mb-1 block text-xs font-bold text-samsung">[{label}]</span>
+      <input
+        className="h-11 min-w-0 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-navy transition placeholder:text-slate-400 hover:border-slate-300 focus:border-samsung"
+        value={value}
+        placeholder={placeholder ?? "입력 대기"}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
   );
 }
 
@@ -1201,7 +1620,7 @@ function formatKrwDisplay(amount: number | null) {
   return `${amount.toLocaleString("ko-KR")}원`;
 }
 
-function buildStructuredJsonPayload(formData: AppState, riskResult: RiskResult): StructuredJsonPayload {
+function buildStructuredJsonPayload(formData: AppState, riskResult: RiskResult, customerProfile?: CustomerProfile): StructuredJsonPayload {
   const financial = formData.financial;
   const rrttllu = formData.rrttllu;
   const warnings: string[] = [];
@@ -1226,6 +1645,13 @@ function buildStructuredJsonPayload(formData: AppState, riskResult: RiskResult):
   const interestAmount = parseKrwAmount(expectedInterestIncome);
   const dividendAmount = parseKrwAmount(expectedDividendIncome);
   const taxAlert = financialIncomeTaxAlert(interestAmount, dividendAmount);
+  const hasMissingProfileInfo =
+    !customerProfile ||
+    !nullableText(customerProfile.name) ||
+    !nullableText(customerProfile.gender) ||
+    !nullableText(customerProfile.birthYear) ||
+    !nullableText(customerProfile.age) ||
+    !nullableText(customerProfile.job);
 
   const riskAnswers = {
     investment_experience: nullableArray(rrttllu.investmentExperience),
@@ -1237,6 +1663,9 @@ function buildStructuredJsonPayload(formData: AppState, riskResult: RiskResult):
     loss_response: nullableText(rrttllu.lossResponse)
   };
 
+  if (hasMissingProfileInfo) {
+    warnings.push("기본 신상 정보가 부족합니다.");
+  }
   if (!assetSummary || !annualFixedIncome || !monthlyFixedExpense || !irregularIncome) {
     warnings.push("기본 재무 정보가 부족합니다.");
   }
@@ -1536,8 +1965,19 @@ function IncomeWithNoneField({
 }) {
   return (
     <div className="question-card rounded-lg border border-slate-200 p-4">
-      <p className="text-sm font-bold text-slate-700">{questionLabel(label)}</p>
-      <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_140px]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-bold text-slate-700">{questionLabel(label)}</p>
+        <button
+          type="button"
+          onClick={onToggleNone}
+          className={`min-h-10 rounded-lg border px-4 py-2 text-sm font-bold transition ${
+            noneSelected ? "border-samsung bg-blue-50 text-samsung" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+          }`}
+        >
+          없음
+        </button>
+      </div>
+      <div className="mt-3">
         <input
           className="h-12 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-ink shadow-sm transition placeholder:text-slate-400 hover:border-slate-300 focus:border-samsung disabled:bg-slate-100 disabled:text-slate-400"
           value={value}
@@ -1545,15 +1985,6 @@ function IncomeWithNoneField({
           disabled={noneSelected}
           onChange={(event) => onChange(event.target.value)}
         />
-        <button
-          type="button"
-          onClick={onToggleNone}
-          className={`min-h-12 rounded-lg border px-3 py-2 text-sm font-bold transition ${
-            noneSelected ? "border-samsung bg-blue-50 text-samsung" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-          }`}
-        >
-          없음
-        </button>
       </div>
     </div>
   );
