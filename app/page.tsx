@@ -356,14 +356,10 @@ function normalizeCustomerProfile(value: unknown, fallback: CustomerProfile): Cu
     const value = typeof text === "string" ? text : fallbackText;
     return value === "입력 대기" ? "" : value;
   };
-  const normalizeProfileName = (text: unknown, fallbackText: string, id: string) => {
-    const value = normalizeProfileText(text, fallbackText);
-    return value === "신규 고객" ? "" : value;
-  };
   const id = typeof profile.id === "string" && profile.id ? profile.id : fallback.id;
   const normalized = {
     id,
-    name: normalizeProfileName(profile.name, fallback.name, id),
+    name: normalizeProfileText(profile.name, fallback.name),
     gender: normalizeProfileText(profile.gender, fallback.gender),
     birthYear: normalizeProfileText(profile.birthYear, fallback.birthYear),
     age: normalizeProfileText(profile.age, fallback.age),
@@ -652,9 +648,13 @@ export default function Home() {
   };
 
   const updateCustomerProfile = (key: keyof Omit<CustomerProfile, "id">, value: string) => {
-    setCustomerProfiles((prev) =>
-      prev.map((profile) => (profile.id === selectedCustomer ? { ...profile, [key]: value } : profile))
-    );
+    setCustomerProfiles((prev) => {
+      const nextProfiles = prev.map((profile) => (profile.id === selectedCustomer ? { ...profile, [key]: value } : profile));
+      if (storageReady) {
+        saveStoredCustomerState(nextProfiles, customerData, selectedCustomer);
+      }
+      return nextProfiles;
+    });
   };
 
   const setFinancial = (key: keyof FinancialInfo, value: string) => {
