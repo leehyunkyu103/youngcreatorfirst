@@ -244,6 +244,7 @@ const defaultCustomerProfiles: CustomerProfile[] = [
 ];
 
 const storageKey = "samsung-vvip-advisor-customer-data-v1";
+const selectedCustomerStorageKey = "samsung-vvip-advisor-selected-customer-id";
 
 const legacyDefaultProfileValues: Record<string, Omit<CustomerProfile, "id">> = {
   kim: {
@@ -346,7 +347,7 @@ function createNewCustomerProfile(): CustomerProfile {
 function customerTabLabel(profile: CustomerProfile) {
   const enteredName = profile.name.trim();
   const name = enteredName ? enteredName : "신규 고객";
-  const birthYear = profile.birthYear.trim();
+  const birthYear = (profile.birth_year ?? profile.birthYear).trim();
   const year = birthYear || "xxxx";
   return `${name} (${year})`;
 }
@@ -380,7 +381,7 @@ function normalizeAppState(value: unknown): AppState {
 function normalizeCustomerProfile(value: unknown, fallback: CustomerProfile): CustomerProfile {
   const profile = value && typeof value === "object" ? (value as Partial<CustomerProfile>) : {};
   const normalizeProfileText = (text: unknown, fallbackText: string) => {
-    const value = typeof text === "string" ? text : fallbackText;
+    const value = typeof text === "string" ? text : "";
     return value === "입력 대기" ? "" : value;
   };
   const id = typeof profile.id === "string" && profile.id ? profile.id : fallback.id;
@@ -608,9 +609,7 @@ function customerProfileColumnPayload(updatedCustomer: CustomerProfile) {
   };
 
   Object.entries(entries).forEach(([key, value]) => {
-    if (hasSavableCustomerValue(value)) {
-      payload[key] = cleanCustomerValue(value);
-    }
+    payload[key] = cleanCustomerValue(value);
   });
 
   return payload;
@@ -685,12 +684,17 @@ async function saveCustomerProfileColumns(updatedCustomer: CustomerProfile): Pro
     return { ok: true, message: "No customer profile columns to save." };
   }
 
-  const payload = { id: updatedCustomer.id, ...profileColumns };
+  const updatedAt = new Date().toISOString();
+  const profileUpdatePayload = {
+    ...profileColumns,
+    updated_at: updatedAt
+  };
+  const payload = { id: updatedCustomer.id, ...profileUpdatePayload };
   console.info("saving customer payload", payload);
 
   const { data, error } = await supabase
     .from("customers")
-    .update(profileColumns)
+    .update(profileUpdatePayload)
     .eq("id", updatedCustomer.id)
     .select("id,name,gender,birth_year,age,job");
 
@@ -700,9 +704,28 @@ async function saveCustomerProfileColumns(updatedCustomer: CustomerProfile): Pro
   }
 
   if (!data || data.length === 0) {
-    const message = "Supabase customer row was not found, so profile columns were not saved.";
-    console.error("[Supabase] customer profile UPDATE missing row", { id: updatedCustomer.id, payload });
-    return { ok: false, message };
+    const insertPayload = {
+      id: updatedCustomer.id,
+      ...profileUpdatePayload,
+      data: {},
+      sort_order: updatedCustomer.sort_order ?? 0
+    };
+    console.info("[Supabase] customer profile row missing; inserting profile row", insertPayload);
+    const { data: insertedData, error: insertError } = await supabase
+      .from("customers")
+      .insert(insertPayload)
+      .select("id,name,gender,birth_year,age,job");
+
+    if (insertError) {
+      console.error("[Supabase] customer profile INSERT failed", insertError);
+      return { ok: false, message: `Supabase customer profile insert failed: ${insertError.message}` };
+    }
+
+    if (!insertedData || insertedData.length === 0) {
+      const message = "Supabase customer profile row was not inserted.";
+      console.error("[Supabase] customer profile INSERT returned no row", { id: updatedCustomer.id, insertPayload });
+      return { ok: false, message };
+    }
   }
 
   const { data: verifiedData, error: verifyError } = await supabase
@@ -929,6 +952,16 @@ async function saveStoredCustomerState(customerProfiles: CustomerProfile[], cust
   return customerStorage.save({ customerProfiles, customerData, selectedCustomer });
 }
 
+function getStoredSelectedCustomerId() {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(selectedCustomerStorageKey);
+}
+
+function storeSelectedCustomerId(customerId: CustomerId) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(selectedCustomerStorageKey, customerId);
+}
+
 const noneExperience = "금융상품에 투자해 본 경험 없음";
 const noLegalConstraint = "없음";
 
@@ -1054,9 +1087,15 @@ export default function Home() {
 
       const storedState = rows.length ? customerRowsToStoredState(rows) : null;
       if (storedState) {
+        const storedSelectedCustomerId = getStoredSelectedCustomerId();
+        const nextSelectedCustomer =
+          storedSelectedCustomerId && storedState.customerProfiles.some((profile) => profile.id === storedSelectedCustomerId)
+            ? storedSelectedCustomerId
+            : storedState.selectedCustomer;
         setCustomerProfiles(storedState.customerProfiles);
         setCustomerData(storedState.customerData);
-        setSelectedCustomer(storedState.selectedCustomer);
+        setSelectedCustomer(nextSelectedCustomer);
+        storeSelectedCustomerId(nextSelectedCustomer);
         setPersistedCustomerIds(rows.map((row) => row.id));
         setCustomerUpdatedAt(customerRowsToUpdatedMap(rows));
       }
@@ -1165,6 +1204,7 @@ export default function Home() {
 
   const selectCustomer = (customerId: CustomerId) => {
     setSelectedCustomer(customerId);
+    storeSelectedCustomerId(customerId);
     setAnalysisRequested(false);
     setConfirmedRiskResult(null);
     setLastAnalysisSnapshot(null);
@@ -1277,12 +1317,12 @@ export default function Home() {
     markCustomerUpdated(updatedCustomer.id);
     if (!storageReady) return;
     if (isSeeding) return;
-    if (!persistedCustomerIds.includes(updatedCustomer.id)) return;
 
     void saveCustomerProfileColumns(updatedCustomer).then((result) => {
       if (!result.ok) {
         setStorageErrorMessage(result.message);
       } else {
+        setPersistedCustomerIds((prev) => (prev.includes(updatedCustomer.id) ? prev : [...prev, updatedCustomer.id]));
         setStorageErrorMessage("");
       }
     });
