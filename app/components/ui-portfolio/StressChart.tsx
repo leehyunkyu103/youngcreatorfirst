@@ -235,7 +235,7 @@ export default function StressChart() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                   <YAxis tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 12 }} />
-                  <Tooltip formatter={(v: number) => `${v}%`} />
+                  <Tooltip formatter={(v) => `${v}%`} />
                   <Legend />
                   <Bar dataKey="기존포트폴리오" fill={NAVY} name="기존 포트폴리오" />
                   <Bar dataKey="신규포트폴리오" fill={GOLD} name="신규 포트폴리오" />
