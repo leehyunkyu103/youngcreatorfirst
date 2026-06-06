@@ -15,7 +15,7 @@ const PERSONAS: Persona[] = [
   { name: "이재형 (65세)", totalAum: 15000, rTarget: 0.04, aRisk: 5, tYear: 20, tTax: 1, lCash: 12 },
 ];
 
-const RISK_LABELS = ["", "공격적", "적극적", "중립형", "보수적", "초보수적"];
+const RISK_LABELS = ["", "공격적", "적극적", "중립형", "보수적", "원금보존"];
 const RISK_COLORS = ["", "#EF4444", "#F97316", "#EAB308", "#3B82F6", "#6366F1"];
 
 function calcAllocation(totalAum: number, rTarget: number, aRisk: number, tYear: number, tTax: number, lCash: number) {
@@ -38,10 +38,41 @@ function calcAllocation(totalAum: number, rTarget: number, aRisk: number, tYear:
   };
 }
 
+// 곽준호 ASSET_RISK_PROXY_TABLE 기반 버킷별 프록시
+const BUCKET_PROXY = {
+  growth:  { annVol: 0.22, mdd: 0.32 }, // 글로벌주식/성장형 평균
+  income:  { annVol: 0.10, mdd: 0.14 }, // 배당·채권 혼합 평균
+  hedge:   { annVol: 0.14, mdd: 0.20 }, // 금·대체자산 평균
+  taxLiq:  { annVol: 0.02, mdd: 0.03 }, // 단기채·MMF 평균
+};
+
+const RISK_FREE_RATE = 0.035; // 곽준호 quantEngine 동일 무위험수익률 3.5%
+
 function getMetrics(alloc: ReturnType<typeof calcAllocation>, rTarget: number) {
-  const vol = (alloc.growth * 0.18 + alloc.income * 0.08 + alloc.hedge * 0.05 + alloc.taxLiq * 0.02) / 100;
-  const sharpe = vol > 0 ? ((rTarget - 0.03) / vol).toFixed(2) : "0.00";
-  const mdd = (alloc.growth * 0.25 + alloc.income * 0.10 + alloc.hedge * 0.08 + alloc.taxLiq * 0.02) / 100;
+  const w = {
+    growth:  alloc.growth  / 100,
+    income:  alloc.income  / 100,
+    hedge:   alloc.hedge   / 100,
+    taxLiq:  alloc.taxLiq  / 100,
+  };
+
+  // 연환산 변동성 = 자산군별 annVol 가중합 (프록시 기반)
+  const vol =
+    w.growth  * BUCKET_PROXY.growth.annVol +
+    w.income  * BUCKET_PROXY.income.annVol +
+    w.hedge   * BUCKET_PROXY.hedge.annVol  +
+    w.taxLiq  * BUCKET_PROXY.taxLiq.annVol;
+
+  // 샤프지수 = (기대수익률 - 무위험수익률) / 변동성
+  const sharpe = vol > 0 ? ((rTarget - RISK_FREE_RATE) / vol).toFixed(2) : "0.00";
+
+  // MDD = 자산군별 프록시 mdd 가중합
+  const mdd =
+    w.growth  * BUCKET_PROXY.growth.mdd +
+    w.income  * BUCKET_PROXY.income.mdd +
+    w.hedge   * BUCKET_PROXY.hedge.mdd  +
+    w.taxLiq  * BUCKET_PROXY.taxLiq.mdd;
+
   return { vol, sharpe, mdd };
 }
 
@@ -99,7 +130,7 @@ export default function Tuner() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 20 }}>
+        <div className="tuner-layout" style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 20 }}>
           {/* 입력 */}
           <div style={{ flex: 1, minWidth: 300, background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #e5e7eb" }}>
             <div style={{ marginBottom: 20 }}>
@@ -179,7 +210,7 @@ export default function Tuner() {
           </div>
 
           {/* 오른쪽 */}
-          <div style={{ width: 260, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="tuner-right" style={{ width: 260, display: "flex", flexDirection: "column", gap: 12 }}>
             {[
               { label: "자본 증식", value: `${alloc.growth}%`, color: "#3B82F6", sub: "성장형 랩/펀드" },
               { label: "인컴 창출", value: `${alloc.income}%`, color: GOLD, sub: "배당·채권형" },
@@ -242,4 +273,4 @@ export default function Tuner() {
       </div>
     </div>
   );
-}
+} 

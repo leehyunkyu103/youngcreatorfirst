@@ -45,6 +45,7 @@ const TYPE_COLORS: Record<string, string> = {
 
 export default function ProductCard() {
   const [activeFilter, setActiveFilter] = useState("전체");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const filtered = allProducts.filter(p => {
     if (activeFilter === "전체") return true;
@@ -56,10 +57,19 @@ export default function ProductCard() {
 
   const top4 = [...filtered].sort((a, b) => b.score - a.score).slice(0, 4);
 
+  function toggleSelect(id: number) {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  }
+
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f7fa", padding: "32px 24px", fontFamily: "sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f1f5f9", padding: "32px 24px", fontFamily: "sans-serif" }}>
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
-        <h1 style={{ color: NAVY, fontSize: 22, fontWeight: 700, marginBottom: 24 }}>상품 추천</h1>
+        <h1 style={{ color: NAVY, fontSize: 22, fontWeight: 700, marginBottom: 8 }}>상품 추천</h1>
+        {selectedIds.length > 0 && (
+          <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 13, color: NAVY, fontWeight: 600 }}>
+            선택된 상품 {selectedIds.length}개 — {allProducts.filter(p => selectedIds.includes(p.id)).map(p => p.name).join(", ")}
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 8, marginBottom: 28, flexWrap: "wrap" }}>
           {FILTERS.map(f => (
@@ -73,60 +83,62 @@ export default function ProductCard() {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-          {top4.map((p, i) => (
-            <div key={p.id} style={{
-              background: "#fff", borderRadius: 12, padding: 20,
-              boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #e5e7eb",
-              borderTop: `3px solid ${i === 0 ? GOLD : TYPE_COLORS[p.type] || NAVY}`,
-              display: "flex", flexDirection: "column"
-            }}>
-              {/* 상단 배지 */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <span style={{ background: i === 0 ? GOLD : NAVY, color: "#fff", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>TOP {i + 1}</span>
-                <div style={{ display: "flex", gap: 4 }}>
-                  <span style={{ background: TYPE_COLORS[p.type] + "20", color: TYPE_COLORS[p.type], borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 600 }}>{p.type}</span>
-                  {p.isa && <span style={{ background: "#EFF6FF", color: NAVY, borderRadius: 20, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>ISA</span>}
-                </div>
-              </div>
-
-              {/* 상품명 */}
-              <div style={{ color: NAVY, fontWeight: 700, fontSize: 13, marginBottom: 4, lineHeight: 1.4 }}>{p.name}</div>
-              <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 8 }}>{p.productType} · {p.manager}</div>
-              <div style={{ color: "#6b7280", fontSize: 11, marginBottom: 12, lineHeight: 1.6, flexGrow: 1 }}>{p.description}</div>
-
-              {/* 지표 */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
-                {[
-                  { label: "기대수익", value: `${p.returnRate}%`, color: "#10B981" },
-                  { label: "수수료", value: `${p.fee}%`, color: NAVY },
-                  { label: "위험등급", value: p.risk, color: p.risk === "고위험" ? "#EF4444" : p.risk === "중위험" ? GOLD : "#10B981" },
-                  { label: "AUM(억)", value: p.aum.toLocaleString(), color: NAVY },
-                ].map(m => (
-                  <div key={m.label} style={{ background: "#f9fafb", borderRadius: 6, padding: "6px 8px" }}>
-                    <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>{m.label}</div>
-                    <div style={{ color: m.color, fontWeight: 700, fontSize: 12 }}>{m.value}</div>
+          {top4.map((p, i) => {
+            const isSelected = selectedIds.includes(p.id);
+            return (
+              <div key={p.id} onClick={() => toggleSelect(p.id)} style={{
+                background: "#fff", borderRadius: 12, padding: 20,
+                boxShadow: isSelected ? `0 0 0 2px ${GOLD}, 0 4px 12px rgba(0,0,0,0.1)` : "0 1px 4px rgba(0,0,0,0.06)",
+                border: isSelected ? `2px solid ${GOLD}` : "1px solid #e5e7eb",
+                borderTop: `3px solid ${i === 0 ? GOLD : TYPE_COLORS[p.type] || NAVY}`,
+                display: "flex", flexDirection: "column", cursor: "pointer",
+                transition: "all 0.15s"
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ background: i === 0 ? GOLD : NAVY, color: "#fff", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>TOP {i + 1}</span>
+                    {isSelected && <span style={{ background: GOLD, color: "#fff", borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>✓ 선택</span>}
                   </div>
-                ))}
-              </div>
-
-              {/* 세제 혜택 */}
-              {p.taxBenefit && (
-                <div style={{ background: "#F0FDF4", color: "#16a34a", borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 600, marginBottom: 10 }}>
-                  ✓ 세제 혜택 상품
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <span style={{ background: TYPE_COLORS[p.type] + "20", color: TYPE_COLORS[p.type], borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 600 }}>{p.type}</span>
+                    {p.isa && <span style={{ background: "#EFF6FF", color: NAVY, borderRadius: 20, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>ISA</span>}
+                  </div>
                 </div>
-              )}
-              {!p.taxBenefit && <div style={{ height: 26, marginBottom: 10 }} />}
 
-              {/* 스코어 */}
-              <div style={{ color: NAVY, fontWeight: 700, fontSize: 15, marginBottom: 12 }}>스코어 {p.score}</div>
+                <div style={{ color: NAVY, fontWeight: 700, fontSize: 13, marginBottom: 4, lineHeight: 1.4 }}>{p.name}</div>
+                <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 8 }}>{p.productType} · {p.manager}</div>
+                <div style={{ color: "#6b7280", fontSize: 11, marginBottom: 12, lineHeight: 1.6, flexGrow: 1 }}>{p.description}</div>
 
-              {/* 약관 버튼 — 항상 하단 고정 */}
-              <button onClick={() => alert(`${p.name} 약관 다운로드 (더미)`)}
-                style={{ width: "100%", padding: "10px", background: NAVY, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 12, marginTop: "auto" }}>
-                약관 다운로드
-              </button>
-            </div>
-          ))}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
+                  {[
+                    { label: "기대수익", value: `${p.returnRate}%`, color: "#10B981" },
+                    { label: "수수료", value: `${p.fee}%`, color: NAVY },
+                    { label: "위험등급", value: p.risk, color: p.risk === "고위험" ? "#EF4444" : p.risk === "중위험" ? GOLD : "#10B981" },
+                    { label: "AUM(억)", value: p.aum.toLocaleString(), color: NAVY },
+                  ].map(m => (
+                    <div key={m.label} style={{ background: "#f9fafb", borderRadius: 6, padding: "6px 8px" }}>
+                      <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>{m.label}</div>
+                      <div style={{ color: m.color, fontWeight: 700, fontSize: 12 }}>{m.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {p.taxBenefit && (
+                  <div style={{ background: "#F0FDF4", color: "#16a34a", borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 600, marginBottom: 10 }}>
+                    ✓ 세제 혜택 상품
+                  </div>
+                )}
+                {!p.taxBenefit && <div style={{ height: 26, marginBottom: 10 }} />}
+
+                <div style={{ color: NAVY, fontWeight: 700, fontSize: 15, marginBottom: 12 }}>스코어 {p.score}</div>
+
+                <button onClick={(e) => { e.stopPropagation(); alert(`${p.name} 약관 다운로드 (더미)`); }}
+                  style={{ width: "100%", padding: "10px", background: isSelected ? GOLD : NAVY, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 12, marginTop: "auto", transition: "background 0.15s" }}>
+                  약관 다운로드
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
