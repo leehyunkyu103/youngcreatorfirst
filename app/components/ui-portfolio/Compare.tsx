@@ -257,9 +257,8 @@ export default function Compare() {
 </body>
 </html>`;
 
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+const encoded = "data:text/html;charset=utf-8," + encodeURIComponent(html);
+window.open(encoded, "_blank");
   }
 
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
