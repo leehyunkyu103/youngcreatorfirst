@@ -82,7 +82,7 @@ export default function ProductCard() {
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+        <div className="product-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
           {top4.map((p, i) => {
             const isSelected = selectedIds.includes(p.id);
             return (
@@ -132,7 +132,7 @@ export default function ProductCard() {
 
                 <div style={{ color: NAVY, fontWeight: 700, fontSize: 15, marginBottom: 12 }}>스코어 {p.score}</div>
 
-                <button onClick={(e) => { e.stopPropagation(); alert(`${p.name} 약관 다운로드 (더미)`); }}
+                <button onClick={(e) => { e.stopPropagation(); window.open("https://www.samsungpop.com/mbd/mbdg.do?cmd=fund", "_blank"); }}
                   style={{ width: "100%", padding: "10px", background: isSelected ? GOLD : NAVY, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 12, marginTop: "auto", transition: "background 0.15s" }}>
                   약관 다운로드
                 </button>
