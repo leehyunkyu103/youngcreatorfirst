@@ -8,48 +8,40 @@ const GOLD = "#C9A84C";
 type Product = {
   id: number;
   name: string;
-  type: "성장" | "인컴" | "안전";
+  type: "자본증식" | "인컴창출" | "위험헷지" | "절세·유동성";
   risk: "저위험" | "중위험" | "고위험";
   isa: boolean;
   score: number;
-  return: number;
+  returnRate: number;
   fee: number;
   aum: number;
-  currency: "KRW" | "USD";
-  taxBenefit: boolean;
+  productType: "랩어카운트" | "펀드";
   manager: string;
-  region: "국내" | "해외" | "글로벌";
+  description: string;
+  taxBenefit: boolean;
 };
 
 const allProducts: Product[] = [
-  { id: 1, name: "삼성 글로벌 배당 ETF", type: "인컴", risk: "저위험", isa: true, score: 92, return: 7.2, fee: 0.15, aum: 12000, currency: "KRW", taxBenefit: true, manager: "삼성자산운용", region: "글로벌" },
-  { id: 2, name: "미국 S&P500 인덱스 펀드", type: "성장", risk: "중위험", isa: false, score: 88, return: 11.3, fee: 0.05, aum: 85000, currency: "USD", taxBenefit: false, manager: "블랙록", region: "해외" },
-  { id: 3, name: "국내 우량채 ETF", type: "안전", risk: "저위험", isa: true, score: 85, return: 3.8, fee: 0.12, aum: 9500, currency: "KRW", taxBenefit: true, manager: "KB자산운용", region: "국내" },
-  { id: 4, name: "글로벌 리츠 펀드", type: "인컴", risk: "중위험", isa: false, score: 83, return: 6.5, fee: 0.45, aum: 7200, currency: "USD", taxBenefit: false, manager: "미래에셋", region: "글로벌" },
-  { id: 5, name: "한국 중소형 성장주 펀드", type: "성장", risk: "고위험", isa: true, score: 78, return: 14.2, fee: 0.8, aum: 3400, currency: "KRW", taxBenefit: true, manager: "한국투자신탁", region: "국내" },
-  { id: 6, name: "달러 MMF", type: "안전", risk: "저위험", isa: false, score: 76, return: 2.1, fee: 0.1, aum: 45000, currency: "USD", taxBenefit: false, manager: "삼성자산운용", region: "해외" },
-  { id: 7, name: "유럽 배당주 ETF", type: "인컴", risk: "저위험", isa: true, score: 74, return: 5.8, fee: 0.25, aum: 6800, currency: "USD", taxBenefit: true, manager: "뱅가드", region: "해외" },
-  { id: 8, name: "나스닥100 ETF", type: "성장", risk: "고위험", isa: false, score: 71, return: 18.4, fee: 0.2, aum: 120000, currency: "USD", taxBenefit: false, manager: "인베스코", region: "해외" },
-  { id: 9, name: "단기 국공채 펀드", type: "안전", risk: "저위험", isa: true, score: 69, return: 3.2, fee: 0.08, aum: 22000, currency: "KRW", taxBenefit: true, manager: "NH아문디", region: "국내" },
-  { id: 10, name: "아시아 신흥국 펀드", type: "성장", risk: "고위험", isa: false, score: 67, return: 9.8, fee: 0.9, aum: 4100, currency: "USD", taxBenefit: false, manager: "피델리티", region: "해외" },
-  { id: 11, name: "글로벌 인프라 펀드", type: "인컴", risk: "중위험", isa: true, score: 65, return: 5.1, fee: 0.55, aum: 5600, currency: "USD", taxBenefit: true, manager: "맥쿼리", region: "글로벌" },
-  { id: 12, name: "국내 단기채 ETF", type: "안전", risk: "저위험", isa: false, score: 63, return: 2.8, fee: 0.08, aum: 18000, currency: "KRW", taxBenefit: false, manager: "키움투자자산운용", region: "국내" },
-  { id: 13, name: "헬스케어 섹터 ETF", type: "성장", risk: "중위험", isa: true, score: 61, return: 8.4, fee: 0.4, aum: 9200, currency: "USD", taxBenefit: true, manager: "스테이트스트리트", region: "해외" },
-  { id: 14, name: "미국 리츠 ETF", type: "인컴", risk: "중위험", isa: false, score: 59, return: 6.1, fee: 0.35, aum: 31000, currency: "USD", taxBenefit: false, manager: "뱅가드", region: "해외" },
-  { id: 15, name: "원자재 혼합 펀드", type: "성장", risk: "고위험", isa: true, score: 57, return: 10.2, fee: 0.7, aum: 2800, currency: "USD", taxBenefit: true, manager: "골드만삭스", region: "글로벌" },
-  { id: 16, name: "채권혼합 밸런스 펀드", type: "안전", risk: "저위험", isa: false, score: 55, return: 4.1, fee: 0.2, aum: 14000, currency: "KRW", taxBenefit: false, manager: "한화자산운용", region: "국내" },
-  { id: 17, name: "일본 배당주 펀드", type: "인컴", risk: "중위험", isa: true, score: 53, return: 4.8, fee: 0.5, aum: 3200, currency: "USD", taxBenefit: true, manager: "노무라", region: "해외" },
-  { id: 18, name: "중국 본토 A주 펀드", type: "성장", risk: "고위험", isa: false, score: 51, return: 12.3, fee: 1.0, aum: 5500, currency: "USD", taxBenefit: false, manager: "CSAM", region: "해외" },
-  { id: 19, name: "ESG 글로벌 펀드", type: "성장", risk: "중위험", isa: true, score: 49, return: 7.9, fee: 0.45, aum: 8700, currency: "USD", taxBenefit: true, manager: "블랙록", region: "글로벌" },
-  { id: 20, name: "단기 회사채 ETF", type: "안전", risk: "저위험", isa: false, score: 47, return: 3.5, fee: 0.18, aum: 11000, currency: "KRW", taxBenefit: false, manager: "삼성자산운용", region: "국내" },
-  { id: 21, name: "미국 배당성장 ETF", type: "인컴", risk: "저위험", isa: true, score: 45, return: 6.8, fee: 0.06, aum: 62000, currency: "USD", taxBenefit: true, manager: "뱅가드", region: "해외" },
-  { id: 22, name: "글로벌 채권혼합 펀드", type: "안전", risk: "저위험", isa: false, score: 43, return: 3.1, fee: 0.3, aum: 7800, currency: "USD", taxBenefit: false, manager: "PIMCO", region: "글로벌" },
-  { id: 23, name: "국내 대형주 액티브 펀드", type: "성장", risk: "중위험", isa: true, score: 41, return: 9.1, fee: 0.75, aum: 4300, currency: "KRW", taxBenefit: true, manager: "미래에셋", region: "국내" },
-  { id: 24, name: "글로벌 멀티에셋 펀드", type: "인컴", risk: "중위험", isa: false, score: 39, return: 5.5, fee: 0.6, aum: 9100, currency: "USD", taxBenefit: false, manager: "JP모건", region: "글로벌" },
-  { id: 25, name: "국내 ISA 채권형 랩", type: "안전", risk: "저위험", isa: true, score: 37, return: 4.3, fee: 0.25, aum: 6200, currency: "KRW", taxBenefit: true, manager: "삼성증권", region: "국내" },
+  { id: 1, name: "삼성 글로벌 반도체 혁신 랩", type: "자본증식", risk: "고위험", isa: false, score: 95, returnRate: 15.2, fee: 1.2, aum: 8500, productType: "랩어카운트", manager: "삼성증권 PB본부", description: "AI·반도체 밸류체인 집중 투자. 자사주 매매 제한 고객의 간접 투자 솔루션.", taxBenefit: false },
+  { id: 2, name: "삼성 글로벌 일류기업 랩", type: "자본증식", risk: "중위험", isa: false, score: 88, returnRate: 9.8, fee: 1.0, aum: 12000, productType: "랩어카운트", manager: "삼성증권 PB본부", description: "나스닥 대형주 중심 PB 일임 운용. 바쁜 전문직을 위한 주도주 자동 리밸런싱.", taxBenefit: false },
+  { id: 3, name: "글로벌 배당귀족 펀드", type: "자본증식", risk: "저위험", isa: true, score: 82, returnRate: 6.5, fee: 0.8, aum: 9200, productType: "펀드", manager: "삼성자산운용", description: "선진국 초우량 배당주 편입. 극저변동성으로 물가상승률 방어.", taxBenefit: true },
+  { id: 4, name: "글로벌 인프라·리츠 펀드", type: "인컴창출", risk: "중위험", isa: false, score: 90, returnRate: 7.1, fee: 0.9, aum: 7800, productType: "펀드", manager: "삼성자산운용", description: "매월 안정적 현금흐름 창출. 고정비 부담이 큰 전문직 고객의 인컴 솔루션.", taxBenefit: false },
+  { id: 5, name: "월지급식 배당 랩", type: "인컴창출", risk: "저위험", isa: true, score: 87, returnRate: 5.8, fee: 1.1, aum: 6500, productType: "랩어카운트", manager: "삼성증권 PB본부", description: "매월 확정 이자 지급. 생활비 현금흐름 목적 고객에 최적화.", taxBenefit: true },
+  { id: 6, name: "우량 회사채 매치드 랩", type: "인컴창출", risk: "저위험", isa: false, score: 85, returnRate: 4.8, fee: 0.7, aum: 11000, productType: "랩어카운트", manager: "삼성증권 PB본부", description: "이자 지급 주기를 월 단위로 세팅. 매월 생활비 목적에 최적화.", taxBenefit: false },
+  { id: 7, name: "미국 배당성장 펀드", type: "인컴창출", risk: "저위험", isa: true, score: 80, returnRate: 6.2, fee: 0.6, aum: 15000, productType: "펀드", manager: "삼성자산운용", description: "금융소득종합과세 최소화. 배당 상품 소액 편입용.", taxBenefit: true },
+  { id: 8, name: "비트코인 현물 ETF 관련 펀드", type: "위험헷지", risk: "고위험", isa: false, score: 78, returnRate: 18.5, fee: 1.5, aum: 3200, productType: "펀드", manager: "삼성자산운용", description: "암호화폐 관심 고객의 제도권 편입 솔루션. 포트폴리오 양성화.", taxBenefit: false },
+  { id: 9, name: "미국 달러 단기채 펀드", type: "위험헷지", risk: "저위험", isa: false, score: 86, returnRate: 4.2, fee: 0.5, aum: 9800, productType: "펀드", manager: "삼성자산운용", description: "환율 급등 시 방어막. 외화 자산 선호 고객의 달러 헷지 솔루션.", taxBenefit: false },
+  { id: 10, name: "삼성 금 현물 펀드", type: "위험헷지", risk: "저위험", isa: false, score: 83, returnRate: 5.1, fee: 0.4, aum: 7200, productType: "펀드", manager: "삼성자산운용", description: "위기 방어 및 증여 유연성 확보. 무기명 자산 성격의 실물 금 연계.", taxBenefit: false },
+  { id: 11, name: "초단기 우량채 펀드 (ISA)", type: "절세·유동성", risk: "저위험", isa: true, score: 92, returnRate: 3.8, fee: 0.2, aum: 22000, productType: "펀드", manager: "삼성자산운용", description: "부동산 매입 시 원금 손실 없이 즉시 현금화 가능. ISA 계좌 절세.", taxBenefit: true },
+  { id: 12, name: "미국 국채 2년물 타겟만기 펀드", type: "절세·유동성", risk: "저위험", isa: false, score: 89, returnRate: 4.5, fee: 0.3, aum: 8400, productType: "펀드", manager: "삼성자산운용", description: "2년 뒤 유학비를 달러로 확정. 환율 변동 리스크 원천 차단.", taxBenefit: false },
+  { id: 13, name: "장기 국고채 분리과세 랩", type: "절세·유동성", risk: "저위험", isa: false, score: 94, returnRate: 4.1, fee: 0.5, aum: 18000, productType: "랩어카운트", manager: "삼성증권 PB본부", description: "만기 10년 이상 국채 분리과세 신청. 세율 49.5%에서 30%로 합법적 절감.", taxBenefit: true },
+  { id: 14, name: "증여 특화 유언대용신탁 연계 랩", type: "절세·유동성", risk: "저위험", isa: false, score: 91, returnRate: 3.5, fee: 0.8, aum: 14000, productType: "랩어카운트", manager: "삼성증권 PB본부", description: "자녀 세대 증여세 절감. 유언대용신탁 연계 자산 이전.", taxBenefit: true },
 ];
 
-const FILTERS = ["전체", "ISA", "저위험", "중위험", "배당·인컴", "성장", "해외", "국내"];
+const FILTERS = ["전체", "자본증식", "인컴창출", "위험헷지", "절세·유동성", "랩어카운트", "펀드", "ISA"];
+const TYPE_COLORS: Record<string, string> = {
+  "자본증식": "#3B82F6", "인컴창출": GOLD, "위험헷지": "#10B981", "절세·유동성": "#8B5CF6"
+};
 
 export default function ProductCard() {
   const [activeFilter, setActiveFilter] = useState("전체");
@@ -57,13 +49,9 @@ export default function ProductCard() {
   const filtered = allProducts.filter(p => {
     if (activeFilter === "전체") return true;
     if (activeFilter === "ISA") return p.isa;
-    if (activeFilter === "저위험") return p.risk === "저위험";
-    if (activeFilter === "중위험") return p.risk === "중위험";
-    if (activeFilter === "배당·인컴") return p.type === "인컴";
-    if (activeFilter === "성장") return p.type === "성장";
-    if (activeFilter === "해외") return p.region === "해외" || p.region === "글로벌";
-    if (activeFilter === "국내") return p.region === "국내";
-    return true;
+    if (activeFilter === "랩어카운트") return p.productType === "랩어카운트";
+    if (activeFilter === "펀드") return p.productType === "펀드";
+    return p.type === activeFilter;
   });
 
   const top4 = [...filtered].sort((a, b) => b.score - a.score).slice(0, 4);
@@ -71,56 +59,70 @@ export default function ProductCard() {
   return (
     <div style={{ minHeight: "100vh", background: "#f5f7fa", padding: "32px 24px", fontFamily: "sans-serif" }}>
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
-        <p style={{ color: "#6b7280", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>신규 포트폴리오 산출</p>
         <h1 style={{ color: NAVY, fontSize: 22, fontWeight: 700, marginBottom: 24 }}>상품 추천</h1>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 28, flexWrap: "wrap" }}>
           {FILTERS.map(f => (
-            <button key={f} onClick={() => setActiveFilter(f)}
-              style={{
-                padding: "8px 16px", borderRadius: 20, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13,
-                background: activeFilter === f ? NAVY : "#fff",
-                color: activeFilter === f ? "#fff" : "#6b7280",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.08)"
-              }}>
-              {f}
-            </button>
+            <button key={f} onClick={() => setActiveFilter(f)} style={{
+              padding: "7px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 12,
+              background: activeFilter === f ? NAVY : "#fff",
+              color: activeFilter === f ? "#fff" : "#6b7280",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.08)"
+            }}>{f}</button>
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
           {top4.map((p, i) => (
-            <div key={p.id} style={{ background: "#fff", borderRadius: 12, padding: 22, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #e5e7eb", borderTop: `3px solid ${i === 0 ? GOLD : NAVY}` }}>
+            <div key={p.id} style={{
+              background: "#fff", borderRadius: 12, padding: 20,
+              boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #e5e7eb",
+              borderTop: `3px solid ${i === 0 ? GOLD : TYPE_COLORS[p.type] || NAVY}`,
+              display: "flex", flexDirection: "column"
+            }}>
+              {/* 상단 배지 */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <span style={{ background: i === 0 ? GOLD : NAVY, color: "#fff", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>TOP {i + 1}</span>
                 <div style={{ display: "flex", gap: 4 }}>
-                  {p.isa && <span style={{ background: "#EFF6FF", color: NAVY, borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 600 }}>ISA</span>}
-                  {p.taxBenefit && <span style={{ background: "#F0FDF4", color: "#16a34a", borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 600 }}>절세</span>}
+                  <span style={{ background: TYPE_COLORS[p.type] + "20", color: TYPE_COLORS[p.type], borderRadius: 20, padding: "2px 8px", fontSize: 10, fontWeight: 600 }}>{p.type}</span>
+                  {p.isa && <span style={{ background: "#EFF6FF", color: NAVY, borderRadius: 20, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>ISA</span>}
                 </div>
               </div>
-              <div style={{ color: NAVY, fontWeight: 700, fontSize: 14, marginBottom: 6, lineHeight: 1.4 }}>{p.name}</div>
-              <div style={{ color: "#9ca3af", fontSize: 11, marginBottom: 10 }}>{p.manager} · {p.region}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
-                <div style={{ background: "#f9fafb", borderRadius: 6, padding: "6px 8px" }}>
-                  <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>기대수익</div>
-                  <div style={{ color: "#10B981", fontWeight: 700, fontSize: 14 }}>{p.return}%</div>
-                </div>
-                <div style={{ background: "#f9fafb", borderRadius: 6, padding: "6px 8px" }}>
-                  <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>수수료</div>
-                  <div style={{ color: NAVY, fontWeight: 700, fontSize: 14 }}>{p.fee}%</div>
-                </div>
-                <div style={{ background: "#f9fafb", borderRadius: 6, padding: "6px 8px" }}>
-                  <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>위험등급</div>
-                  <div style={{ color: p.risk === "고위험" ? "#EF4444" : p.risk === "중위험" ? GOLD : "#10B981", fontWeight: 700, fontSize: 12 }}>{p.risk}</div>
-                </div>
-                <div style={{ background: "#f9fafb", borderRadius: 6, padding: "6px 8px" }}>
-                  <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>AUM(억)</div>
-                  <div style={{ color: NAVY, fontWeight: 700, fontSize: 12 }}>{p.aum.toLocaleString()}</div>
-                </div>
+
+              {/* 상품명 */}
+              <div style={{ color: NAVY, fontWeight: 700, fontSize: 13, marginBottom: 4, lineHeight: 1.4 }}>{p.name}</div>
+              <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 8 }}>{p.productType} · {p.manager}</div>
+              <div style={{ color: "#6b7280", fontSize: 11, marginBottom: 12, lineHeight: 1.6, flexGrow: 1 }}>{p.description}</div>
+
+              {/* 지표 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
+                {[
+                  { label: "기대수익", value: `${p.returnRate}%`, color: "#10B981" },
+                  { label: "수수료", value: `${p.fee}%`, color: NAVY },
+                  { label: "위험등급", value: p.risk, color: p.risk === "고위험" ? "#EF4444" : p.risk === "중위험" ? GOLD : "#10B981" },
+                  { label: "AUM(억)", value: p.aum.toLocaleString(), color: NAVY },
+                ].map(m => (
+                  <div key={m.label} style={{ background: "#f9fafb", borderRadius: 6, padding: "6px 8px" }}>
+                    <div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>{m.label}</div>
+                    <div style={{ color: m.color, fontWeight: 700, fontSize: 12 }}>{m.value}</div>
+                  </div>
+                ))}
               </div>
-              <div style={{ color: NAVY, fontWeight: 700, fontSize: 16, marginBottom: 14 }}>스코어 {p.score}</div>
+
+              {/* 세제 혜택 */}
+              {p.taxBenefit && (
+                <div style={{ background: "#F0FDF4", color: "#16a34a", borderRadius: 6, padding: "4px 8px", fontSize: 10, fontWeight: 600, marginBottom: 10 }}>
+                  ✓ 세제 혜택 상품
+                </div>
+              )}
+              {!p.taxBenefit && <div style={{ height: 26, marginBottom: 10 }} />}
+
+              {/* 스코어 */}
+              <div style={{ color: NAVY, fontWeight: 700, fontSize: 15, marginBottom: 12 }}>스코어 {p.score}</div>
+
+              {/* 약관 버튼 — 항상 하단 고정 */}
               <button onClick={() => alert(`${p.name} 약관 다운로드 (더미)`)}
-                style={{ width: "100%", padding: "9px", background: NAVY, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+                style={{ width: "100%", padding: "10px", background: NAVY, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 12, marginTop: "auto" }}>
                 약관 다운로드
               </button>
             </div>
