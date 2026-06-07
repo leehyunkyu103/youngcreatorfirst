@@ -1,11 +1,11 @@
 "use client";
 
-import { BarChart3, Sparkles } from "lucide-react";
+import { ClipboardList, Sparkles, WalletCards } from "lucide-react";
 import { useCustomerContext } from "../CustomerContext";
-import { Panel, TextField, TextAreaField, ResultCard, ResultGrid, Metric } from "../ui";
+import { Panel, TextAreaField, ResultCard, ResultGrid, Metric } from "../ui";
 
-export default function Tab3Page() {
-  const { formData, riskResult, warnings, setRrttllu, financialCompletion, rrttlluCompletion } = useCustomerContext();
+export default function Tab4Page() {
+  const { formData, riskResult, warnings, internalJsonPayload, setRrttllu, financialCompletion, rrttlluCompletion } = useCustomerContext();
 
   return (
     <>
@@ -13,7 +13,7 @@ export default function Tab3Page() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-sm font-semibold text-samsung">Samsung Securities PB Advisory</p>
-            <h1 className="mt-1 text-2xl font-bold tracking-normal text-navy md:text-3xl">신규 포트폴리오 생성</h1>
+            <h1 className="mt-1 text-2xl font-bold tracking-normal text-navy md:text-3xl">포트폴리오 비교</h1>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Metric label="기본 정보" value={`${financialCompletion}%`} />
@@ -24,25 +24,23 @@ export default function Tab3Page() {
         </div>
       </header>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
-        <section className="space-y-5">
-          <Panel icon={<Sparkles size={18} />} eyebrow="신규 포트폴리오 생성" title="추천 조건 입력">
-            <TextAreaField label="우선 고려할 자산" value={formData.rrttllu.preferredAssets} placeholder="예. 미국 배당주 ETF, 월지급식 채권형 상품" onChange={(v) => setRrttllu("preferredAssets", v)} />
-            <TextAreaField label="추천 후보에서 제외할 자산" value={formData.rrttllu.avoidedAssets} placeholder="예. 가상자산, 가치 평가가 어려운 비상장 자산" onChange={(v) => setRrttllu("avoidedAssets", v)} />
-            <div className="grid gap-3 md:grid-cols-2">
-              <TextField label="정기 현금흐름 필요" value={formData.rrttllu.regularCashflowNeed} placeholder="예. 월 500만 원" onChange={(v) => setRrttllu("regularCashflowNeed", v)} />
-              <TextField label="목돈 사용 계획" value={formData.rrttllu.lumpSumPlan} placeholder="예. 5년 후 1억 원" onChange={(v) => setRrttllu("lumpSumPlan", v)} />
-              <TextField label="비상예비자금 확보 계획" value={formData.rrttllu.emergencyReservePlan} placeholder="예. 의료비 등 비상 상황 대비 1억 원" onChange={(v) => setRrttllu("emergencyReservePlan", v)} />
-            </div>
-          </Panel>
-        </section>
-
-        <aside className="space-y-5">
-          <ResultCard icon={<BarChart3 size={18} />} title="신규 포트폴리오 생성 기준" accent="blue">
-            <ResultGrid rows={[["목표 수익률", formData.rrttllu.returnObjective || "미선택"], ["위험등급", riskResult.level], ["투자 기간", formData.rrttllu.timeHorizon || "미선택"], ["금융자산", formData.financial.financialAssets || "입력 대기"]]} />
-            <p className="mt-3 rounded-lg bg-blue-50 px-4 py-3 text-sm font-semibold leading-6 text-blue-900">선호 자산은 우선 고려 조건으로, 비선호 자산은 제외 조건으로 고객 성향 분석 JSON에 함께 저장됩니다.</p>
+      <div className="space-y-5">
+        <div className="grid gap-5 xl:grid-cols-2">
+          <ResultCard icon={<WalletCards size={18} />} title="기존 포트폴리오" accent="slate">
+            <ResultGrid rows={[["보유/처분 계획", formData.rrttllu.holdingOrDisposalPlan || "입력 대기"], ["비선호 자산", formData.rrttllu.avoidedAssets || "입력 대기"], ["유동성 필요", formData.rrttllu.lumpSumPlan || "입력 대기"], ["비상예비자금", formData.rrttllu.emergencyReservePlan || "입력 대기"], ["Tax 알림", internalJsonPayload.rrttllu.tax.financial_income_tax_alert]]} />
           </ResultCard>
-        </aside>
+
+          <ResultCard icon={<Sparkles size={18} />} title="신규 포트폴리오 생성 기준" accent="blue">
+            <ResultGrid rows={[["선호 자산", formData.rrttllu.preferredAssets || "입력 대기"], ["위험점수", `${riskResult.score}/100`], ["위험등급", riskResult.level], ["투자 기간", formData.rrttllu.timeHorizon || "미선택"]]} />
+          </ResultCard>
+        </div>
+
+        <Panel icon={<ClipboardList size={18} />} eyebrow="포트폴리오 비교" title="비교 기준 보완">
+          <div className="grid gap-3 md:grid-cols-2">
+            <TextAreaField label="기존 자산 운용 계획" value={formData.rrttllu.holdingOrDisposalPlan} placeholder="예. 기존 주식은 유지, 임대 부동산은 매각 검토" onChange={(v) => setRrttllu("holdingOrDisposalPlan", v)} />
+            <TextAreaField label="신규안에서 우선 반영할 자산" value={formData.rrttllu.preferredAssets} placeholder="예. 미국 배당 ETF, 월지급식 상품" onChange={(v) => setRrttllu("preferredAssets", v)} />
+          </div>
+        </Panel>
       </div>
     </>
   );

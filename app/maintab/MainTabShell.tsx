@@ -20,9 +20,8 @@ import {
 
 const tabPaths: Record<string, string> = {
   profile: "/maintab/tab1",
-  existing: "/maintab/tab2",
-  create: "/maintab/tab3",
-  compare: "/maintab/tab4",
+  create: "/maintab/tab2",
+  compare: "/maintab/tab3",
 };
 
 
@@ -274,9 +273,8 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
 
 const segmentToTab: Record<string, string> = {
   tab1: "profile",
-  tab2: "existing",
-  tab3: "create",
-  tab4: "compare",
+  tab2: "create",
+  tab3: "compare",
 };
 
 function TabStrip({ onNavigate }: { onNavigate: (id: string) => void }) {
@@ -284,7 +282,7 @@ function TabStrip({ onNavigate }: { onNavigate: (id: string) => void }) {
   const activeTab = (segment ? segmentToTab[segment] : null) ?? "profile";
 
   return (
-    <nav className="grid shrink-0 gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-soft sm:grid-cols-2 xl:w-44 xl:grid-cols-1 xl:self-start xl:sticky xl:top-6">
+    <nav className="grid shrink-0 gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-soft sm:grid-cols-2 xl:w-56 xl:grid-cols-1 xl:self-start xl:sticky xl:top-6">
       {workspaceTabs.map((tab, index) => (
         <button
           key={tab.id} type="button" onClick={() => onNavigate(tab.id)}

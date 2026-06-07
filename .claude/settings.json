@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git restore *)",
+      "Bash(taskkill /IM node.exe /F)",
+      "Bash(Remove-Item -Recurse -Force \"c:\\\\Users\\\\이소연\\\\Desktop\\\\개인공부자료\\\\AI Study\\\\youngcreator_first_new\\\\app\\\\tab1\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "PowerShell(Start-Process \"http://localhost:3000\")",
+      "Bash(git add *)",
+      "Bash(git rm *)",
+      "Bash(git commit -m ' *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\�̼ҿ�\\Desktop\\���ΰ����ڷ�\\AI Study\\youngcreator_first_new\\app"
+    ]
+  }
+}
