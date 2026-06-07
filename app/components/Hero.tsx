@@ -11,7 +11,7 @@ export default function Hero() {
   const [isExpanded, setIsExpanded] = useState(false)
   const [formStep, setFormStep] = useState<"idle" | "submitting" | "success">("idle")
 
-  const handleExpand = () => router.push("/tab1")
+  const handleExpand = () => router.push("/maintab")
 
   const handleClose = () => {
     setIsExpanded(false)
