@@ -15,8 +15,8 @@ function optionGridClass(count: number) {
 
 const optionButtonClass =
   "min-h-12 rounded-lg border px-4 py-3 text-left text-[15px] font-semibold leading-6 transition";
-const optionIdleClass = "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50";
-const optionSelectedClass = "border-samsung bg-blue-50 text-samsung shadow-sm";
+const optionIdleClass = "border-gray-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50";
+const optionSelectedClass = "border-blue-700 bg-blue-100 text-blue-800 font-semibold shadow-sm";
 const checkerBlue = { bg: "#e2f2ff", border: "#b9dcff" };
 const checkerGray = { bg: "#f8fafc", border: "#d7dde8" };
 
