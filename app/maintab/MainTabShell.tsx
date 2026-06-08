@@ -39,6 +39,7 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
   const [isSeeding, setIsSeeding] = useState(false);
   const [persistedCustomerIds, setPersistedCustomerIds] = useState<CustomerId[]>([]);
   const [customerUpdatedAt, setCustomerUpdatedAt] = useState<CustomerUpdatedMap>({});
+  const [dirtyCustomerData, setDirtyCustomerData] = useState<Record<CustomerId, boolean>>({});
   const [storageErrorMessage, setStorageErrorMessage] = useState("");
   const [analysisRequested, setAnalysisRequested] = useState(false);
   const [confirmedRiskResult, setConfirmedRiskResult] = useState<RiskResult | null>(null);
@@ -109,16 +110,21 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     if (!storageReady || isSeeding || !persistedCustomerIds.includes(selectedCustomer)) return;
+    if (!dirtyCustomerData[selectedCustomer]) return;
     void saveCustomerDataJsonOnly(selectedCustomer, customerDataJsonPayload).then((r) => {
       if (!r.ok) setStorageErrorMessage(r.message);
-      else setStorageErrorMessage("");
+      else {
+        setDirtyCustomerData((prev) => ({ ...prev, [selectedCustomer]: false }));
+        setStorageErrorMessage("");
+      }
     });
-  }, [customerDataJsonPayload, isSeeding, persistedCustomerIds, selectedCustomer, storageReady]);
+  }, [customerDataJsonPayload, dirtyCustomerData, isSeeding, persistedCustomerIds, selectedCustomer, storageReady]);
 
   const markUpdated = (id: CustomerId, ts = Date.now()) => setCustomerUpdatedAt((prev) => ({ ...prev, [id]: ts }));
 
   const setFormData = (updater: (current: AppState) => AppState) => {
     markUpdated(selectedCustomer);
+    setDirtyCustomerData((prev) => ({ ...prev, [selectedCustomer]: true }));
     setCustomerData((prev) => ({ ...prev, [selectedCustomer]: updater(prev[selectedCustomer] ?? createInitialState()) }));
   };
 
@@ -131,10 +137,12 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
   const resetSelectedCustomer = () => {
     if (window.confirm("현재 고객만 초기화하시겠습니까?")) {
       markUpdated(selectedCustomer);
+      setDirtyCustomerData((prev) => ({ ...prev, [selectedCustomer]: true }));
       setCustomerData((prev) => ({ ...prev, [selectedCustomer]: createInitialState() }));
     } else if (window.confirm("전체 고객을 초기화하시겠습니까?")) {
       const ts = Date.now();
       setCustomerUpdatedAt(Object.fromEntries(customerProfiles.map((p) => [p.id, ts])));
+      setDirtyCustomerData(Object.fromEntries(customerProfiles.map((p) => [p.id, true])));
       setCustomerData(createInitialCustomerData(customerProfiles));
       setSelectedCustomer(customerProfiles[0]?.id ?? defaultCustomerProfiles[0].id);
     }
@@ -312,12 +320,12 @@ function CustomerSelector({
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-soft">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <button type="button" onClick={onToggleSearch} className={`min-h-11 rounded-lg px-4 py-2 text-left text-sm font-bold transition ${showCustomers ? "bg-[#2f2f9d] text-white" : "bg-slate-50 text-navy hover:bg-slate-100"}`}>고객명 검색</button>
           <button type="button" onClick={onAddCustomer} className="min-h-11 rounded-lg bg-samsung px-4 py-2 text-left text-sm font-bold text-white transition hover:bg-[#1b35bd]">고객 추가</button>
         </div>
-        <div className="customer-current-summary grid grid-cols-[minmax(0,auto)_auto] content-center items-center gap-x-2 gap-y-1 self-center md:justify-end">
+        <div className="customer-current-summary grid grid-cols-[minmax(0,auto)_auto] content-start items-center justify-end gap-x-2 gap-y-1 self-start text-right">
           <p className="text-sm font-bold text-slate-600">현재 상담 고객: <span className="text-samsung">{currentCustomer ? customerTabLabel(currentCustomer) : "선택 대기"}</span></p>
           <button type="button" onClick={onRequestDelete} aria-label="현재 고객 삭제" className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition hover:border-red-300 hover:bg-red-100"><Trash2 size={17} /></button>
           <p className="basis-full text-xs font-bold text-slate-400">{formatUpdatedAt(recentUpdatedAt)}</p>

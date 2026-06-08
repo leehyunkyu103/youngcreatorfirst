@@ -468,6 +468,7 @@ export function storeSelectedCustomerId(customerId: CustomerId) {
 
 // ── Analysis Functions ─────────────────────────────────────────────────────
 const tenPointScale = [10, 8, 5, 3, 0];
+const ratioScale = [0, 3, 5, 8, 10];
 const knowledgeScale = [10, 6, 3, 0];
 const riskAttitudeScale = [25, 18, 10, 0];
 
@@ -502,8 +503,8 @@ export function calculateRiskResult(rrttllu: RrttlluInfo): RiskResult {
     maxSelectedScore(rrttllu.investmentExperience, riskExperienceOptions, tenPointScale) +
     selectedScore(rrttllu.knowledgeLevel, fieldGroups.knowledge, knowledgeScale) +
     selectedScore(rrttllu.derivativesExperience, fieldGroups.derivatives, tenPointScale) +
-    selectedScore(rrttllu.financialAssetRatio, fieldGroups.financialAssetRatio, tenPointScale) +
-    selectedScore(rrttllu.investmentAssetRatio, fieldGroups.investmentAssetRatio, tenPointScale) +
+    selectedScore(rrttllu.financialAssetRatio, fieldGroups.financialAssetRatio, ratioScale) +
+    selectedScore(rrttllu.investmentAssetRatio, fieldGroups.investmentAssetRatio, ratioScale) +
     selectedScore(rrttllu.riskAttitude, fieldGroups.riskAttitude, riskAttitudeScale) +
     selectedScore(rrttllu.lossResponse, fieldGroups.lossResponse, riskAttitudeScale);
   const level = riskLevel(score);
