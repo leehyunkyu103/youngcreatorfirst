@@ -18,6 +18,19 @@ type ExtractionEnvelope = {
   confidence: Record<string, number>;
 };
 
+type GeminiExtractionResult = {
+  source: "gemini" | "mock";
+  fallback?: boolean;
+  data: ExtractionEnvelope;
+  debug?: {
+    prompt?: string;
+    rawResponse?: unknown;
+    rawTextBeforeParse?: string;
+    parsedBeforeMapping?: unknown;
+    usedFallbackReason?: string;
+  };
+};
+
 const options = {
   returnObjective: [
     "적극적 수익 추구",
@@ -63,24 +76,81 @@ const emptyEnvelope = (): ExtractionEnvelope => ({
   confidence: {},
 });
 
+const stringField = { type: "string", nullable: true };
+const stringArrayField = { type: "array", items: { type: "string" }, nullable: true };
+const booleanField = { type: "boolean", nullable: true };
+const profileSchema = {
+  type: "object",
+  properties: {
+    name: stringField,
+    gender: stringField,
+    birthYear: stringField,
+    birth_year: stringField,
+    age: stringField,
+    job: stringField,
+  },
+};
+const financialProfileSchema = {
+  type: "object",
+  properties: {
+    totalAssets: stringField,
+    financialAssets: stringField,
+    realEstate: stringField,
+    debt: stringField,
+    annualFixedIncome: stringField,
+    monthlyFixedExpense: stringField,
+    irregularIncome: stringField,
+    irregularIncomeNone: booleanField,
+  },
+};
+const rrttlluSchema = {
+  type: "object",
+  properties: {
+    returnObjective: stringField,
+    expectedReturn: stringField,
+    expectedReturnUnknown: booleanField,
+    investmentExperience: stringArrayField,
+    knowledgeLevel: stringField,
+    derivativesExperience: stringField,
+    financialAssetRatio: stringField,
+    investmentAssetRatio: stringField,
+    riskAttitude: stringField,
+    lossResponse: stringField,
+    timeHorizon: stringField,
+    giftingPlan: stringField,
+    globalTaxImportance: stringField,
+    recentGlobalTaxSubject: stringField,
+    foreignStockTaxImportance: stringField,
+    regularCashflowNeed: stringField,
+    lumpSumPlan: stringField,
+    emergencyReservePlan: stringField,
+    legalConstraints: stringArrayField,
+    legalConstraintOther: stringField,
+    preferredAssets: stringField,
+    avoidedAssets: stringField,
+    holdingOrDisposalPlan: stringField,
+    uniqueOther: stringField,
+  },
+};
+
 const responseSchema = {
   type: "object",
   properties: {
     extracted: {
       type: "object",
       properties: {
-        profile: { type: "object" },
-        financialProfile: { type: "object" },
-        rrttllu: { type: "object" },
+        profile: profileSchema,
+        financialProfile: financialProfileSchema,
+        rrttllu: rrttlluSchema,
       },
       required: ["profile", "financialProfile", "rrttllu"],
     },
     inferred: {
       type: "object",
       properties: {
-        profile: { type: "object" },
-        financialProfile: { type: "object" },
-        rrttllu: { type: "object" },
+        profile: profileSchema,
+        financialProfile: financialProfileSchema,
+        rrttllu: rrttlluSchema,
       },
       required: ["profile", "financialProfile", "rrttllu"],
     },
@@ -416,16 +486,29 @@ function buildPrompt(note: string) {
   ].join("\n\n");
 }
 
-async function callGemini(note: string) {
+function isEmptyExtraction(data: ExtractionEnvelope) {
+  return !Object.values(data.extracted.profile).length &&
+    !Object.values(data.extracted.financialProfile).length &&
+    !Object.values(data.extracted.rrttllu).length &&
+    !Object.values(data.inferred.profile).length &&
+    !Object.values(data.inferred.financialProfile).length &&
+    !Object.values(data.inferred.rrttllu).length &&
+    !data.notes.length &&
+    !data.unmapped.length;
+}
+
+async function callGemini(note: string): Promise<GeminiExtractionResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { source: "mock", data: mockExtract(note) };
 
   try {
+    const prompt = buildPrompt(note);
+    console.log("Gemini extraction prompt", prompt);
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: buildPrompt(note) }] }],
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.05,
           responseMimeType: "application/json",
@@ -436,10 +519,30 @@ async function callGemini(note: string) {
 
     if (!response.ok) throw new Error(`Gemini request failed: ${response.status}`);
     const result = await response.json();
+    console.log("Gemini raw response", result);
     const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (typeof text !== "string") throw new Error("Gemini response did not include JSON text.");
+    console.log("Gemini raw text before JSON.parse", text);
     try {
-      return { source: "gemini", data: JSON.parse(text) as ExtractionEnvelope };
+      const parsed = JSON.parse(text) as ExtractionEnvelope;
+      console.log("Gemini parsed extraction before client mapping", parsed);
+      if (isEmptyExtraction(parsed)) {
+        console.warn("Gemini returned an empty extraction object", {
+          rawTextBeforeParse: text,
+          parsedBeforeMapping: parsed,
+          smartInput: note,
+        });
+      }
+      return {
+        source: "gemini",
+        data: parsed,
+        debug: {
+          prompt,
+          rawResponse: result,
+          rawTextBeforeParse: text,
+          parsedBeforeMapping: parsed,
+        },
+      };
     } catch (parseError) {
       console.error("Gemini JSON.parse failed", {
         parseError,
@@ -455,7 +558,14 @@ async function callGemini(note: string) {
       smartInputLength: note.length,
       trimmedLength: note.trim().length,
     });
-    return { source: "mock", fallback: true, data: mockExtract(note) };
+    return {
+      source: "mock",
+      fallback: true,
+      data: mockExtract(note),
+      debug: {
+        usedFallbackReason: error instanceof Error ? error.message : String(error),
+      },
+    };
   }
 }
 
