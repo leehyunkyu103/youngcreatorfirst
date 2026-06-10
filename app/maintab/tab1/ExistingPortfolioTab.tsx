@@ -17,6 +17,8 @@ const PRODUCT_TYPES = [
 
 const COUNTRIES = ["한국", "미국", "일본", "중국", "유럽", "기타"];
 
+const PORTFOLIO_INPUT_KEY = "portfolio-input-assets-v1";
+
 const EMPTY_ASSET: PortfolioAsset = {
   name: "",
   asset_class: "해외주식",
@@ -24,7 +26,7 @@ const EMPTY_ASSET: PortfolioAsset = {
   country: "미국",
   buy_price: null,
   amount: 0,
-  amount_type: "value",
+  amount_type: "quantity",
   is_hedged: false,
   needs_review: false,
   ticker: "",
@@ -51,6 +53,8 @@ export default function ExistingPortfolioTab() {
   const { formData } = useCustomerContext();
 
   const [portfolioAssets, setPortfolioAssets] = useState<PortfolioAsset[]>([]);
+  // isLoaded 는 State → 다음 렌더까지 반영이 지연됨 = save effect의 초기 [] 덮어쓰기 차단 키
+  const [isLoaded, setIsLoaded] = useState(false);
   const [portfolioIsRunning, setPortfolioIsRunning] = useState(false);
   const [portfolioStatusMsg, setPortfolioStatusMsg] = useState("");
   const [portfolioErrorMsg, setPortfolioErrorMsg] = useState("");
@@ -69,22 +73,35 @@ export default function ExistingPortfolioTab() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── 영속화 ────────────────────────────────────────────────────────────────
+  //
+  // 경쟁 조건 방지 구조:
+  //   1) 마운트 effect(deps=[]) → localStorage 복원 후 setIsLoaded(true) 예약
+  //   2) 저장 effect(deps=[portfolioAssets, isLoaded]) → isLoaded가 false면 즉시 return
+  //
+  // isLoaded는 State이므로 같은 커밋 배치 내 save effect가 실행될 때 아직 false 유지됨.
+  // 따라서 초기 [] 가 localStorage 를 덮어쓰는 일이 원천 차단된다.
 
+  // (1) 마운트 시 복원
   useEffect(() => {
     try {
-      const stored = localStorage.getItem("portfolio-assets-v1");
+      const stored = localStorage.getItem(PORTFOLIO_INPUT_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) setPortfolioAssets(parsed as PortfolioAsset[]);
+        const parsed = JSON.parse(stored) as PortfolioAsset[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setPortfolioAssets(parsed);
+        }
       }
     } catch {}
+    setIsLoaded(true); // State 업데이트 → 다음 렌더에서야 반영
   }, []);
 
+  // (2) 변경 시 실시간 저장 — isLoaded=false(초기 렌더 배치) 구간은 건너뜀
   useEffect(() => {
+    if (!isLoaded) return;
     try {
-      localStorage.setItem("portfolio-assets-v1", JSON.stringify(portfolioAssets));
+      localStorage.setItem(PORTFOLIO_INPUT_KEY, JSON.stringify(portfolioAssets));
     } catch {}
-  }, [portfolioAssets]);
+  }, [portfolioAssets, isLoaded]);
 
   // ── 한계세율 추정 ─────────────────────────────────────────────────────────
 
@@ -114,11 +131,8 @@ export default function ExistingPortfolioTab() {
         });
         if (!result) {
           setPortfolioStatusMsg("");
-          setPortfolioErrorMsg("자산 총액이 0원입니다. 금액 또는 수량을 입력해 주세요.");
+          setPortfolioErrorMsg("자산 총액이 0원입니다. 수량과 매수단가를 입력해 주세요.");
           return;
-        }
-        if (Array.isArray(result.enrichedAssets)) {
-          setPortfolioAssets(result.enrichedAssets as PortfolioAsset[]);
         }
         try {
           localStorage.setItem("portfolio-result-v1", JSON.stringify(result));
@@ -265,13 +279,12 @@ export default function ExistingPortfolioTab() {
                   {[
                     "종목명",
                     "티커",
-                    "자산군",
                     "상품유형",
                     "투자국가",
-                    "방식",
-                    "금액(원) / 수량",
-                    "매수단가",
-                    "헤지",
+                    "자산군",
+                    "수량(주/개)",
+                    "매수단가(원화)",
+                    "환헤지",
                     "",
                   ].map((h) => (
                     <th
@@ -313,8 +326,8 @@ export default function ExistingPortfolioTab() {
         {analysisComplete && !portfolioIsRunning && (
           <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5">
             <p className="text-sm font-semibold text-emerald-800">
-              분석 완료 —{" "}
-              <span className="font-bold">3. 포트폴리오 비교</span> 탭에서 결과를 확인하세요.
+              분석 완료 — <span className="font-bold">분산 및 위험 분석</span> 탭 또는{" "}
+              <span className="font-bold">4. 포트폴리오 비교</span> 탭에서 결과를 확인하세요.
             </p>
           </div>
         )}
@@ -392,17 +405,6 @@ function AssetRow({
         )}
       </td>
 
-      {/* 자산군 */}
-      <td className="px-3 py-2">
-        <select
-          className="h-9 rounded border border-slate-200 px-2 text-xs text-navy"
-          value={a.asset_class}
-          onChange={(e) => onUpdate(idx, { asset_class: e.target.value })}
-        >
-          {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </td>
-
       {/* 상품유형 */}
       <td className="px-3 py-2">
         <select
@@ -426,49 +428,32 @@ function AssetRow({
         </select>
       </td>
 
-      {/* 입력 방식 */}
+      {/* 자산군 */}
       <td className="px-3 py-2">
         <select
           className="h-9 rounded border border-slate-200 px-2 text-xs text-navy"
-          value={a.amount_type}
-          onChange={(e) =>
-            onUpdate(idx, { amount_type: e.target.value as "quantity" | "value", _rawAmount: undefined })
-          }
+          value={a.asset_class}
+          onChange={(e) => onUpdate(idx, { asset_class: e.target.value })}
         >
-          <option value="value">금액</option>
-          <option value="quantity">수량</option>
+          {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
       </td>
 
-      {/* 금액 / 수량 */}
+      {/* 수량(주/개) */}
       <td className="px-3 py-2">
-        {a.amount_type === "quantity" ? (
-          <input
-            type="number"
-            className="h-9 w-24 rounded border border-slate-200 px-2 text-xs text-navy"
-            placeholder="수량"
-            value={a.amount || ""}
-            onChange={(e) => {
-              const qty = Number(e.target.value);
-              onUpdate(idx, { amount: qty, current_value: qty * (a.current_price ?? 0) });
-            }}
-          />
-        ) : (
-          <input
-            type="text"
-            className="h-9 w-28 rounded border border-slate-200 px-2 text-xs text-navy"
-            value={a._rawAmount ?? String((a.current_value ?? a.amount) || "")}
-            placeholder="0 또는 1억 (원화 환산)"
-            onChange={(e) => {
-              const raw = e.target.value;
-              const parsed = parseKoreanAmount(raw);
-              onUpdate(idx, { _rawAmount: raw, current_value: parsed, amount: parsed });
-            }}
-          />
-        )}
+        <input
+          type="number"
+          className="h-9 w-24 rounded border border-slate-200 px-2 text-xs text-navy"
+          placeholder="수량"
+          value={a.amount || ""}
+          onChange={(e) => {
+            const qty = Number(e.target.value);
+            onUpdate(idx, { amount: qty, amount_type: "quantity" });
+          }}
+        />
       </td>
 
-      {/* 매수단가 */}
+      {/* 매수단가(원화) */}
       <td className="px-3 py-2">
         <input
           type="number"
