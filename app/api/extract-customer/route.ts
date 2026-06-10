@@ -212,11 +212,84 @@ function extractClauseContaining(text: string, pattern: RegExp, includeNext?: Re
 
 function collectCandidateNotes(text: string) {
   const importantPattern =
-    /(\d[\d,]*(?:\.\d+)?\s*(?:억|천만|백만|만)?\s*원?|\d+(?:\.\d+)?(?:\s*[~\-]\s*\d+(?:\.\d+)?)?\s*%|수십억|수백억|성과급|스톡옵션|매각|자금\s*유입|유학|등록금|생활비|현금\s*흐름|현금흐름|월급\s*외|노후\s*생활비|은퇴\s*후\s*생활비|배당\s*기반|세금|절세|증여|금융소득종합과세|금융종합소득세|임직원|자사주|선행\s*매매|매매\s*제한|전략기획|공격적|고위험|초저위험|원금\s*보전|레버리지|신중|선호|기피|피하고|관심|외화자산|부동산|주식|채권|ETF|암호화폐|가상자산|Time horizon|투자\s*시계|자산\s*집중|벤치마크|본업이\s*바빠|보유\s*지분\s*가치)/i;
+    /(\d[\d,]*(?:\.\d+)?\s*(?:억|천만|백만|만)?\s*원?|\d+(?:\.\d+)?(?:\s*[~\-]\s*\d+(?:\.\d+)?)?\s*%|수십억|수백억|성과급|스톡옵션|매각|자금\s*유입|유학|등록금|생활비|현금\s*흐름|현금흐름|월급\s*외|노후\s*생활비|은퇴\s*후\s*생활비|배당\s*기반|세금|절세|증여|금융소득종합과세|금융종합소득세|임직원|자사주|선행\s*매매|매매\s*제한|전략기획|공격적|고위험|초저위험|원금\s*보전|레버리지|신중|선호|기피|피하고|관심|외화자산|부동산|주식|채권|ETF|암호화폐|가상자산|Time horizon|투자\s*시계|자산\s*집중|벤치마크|본업이\s*바빠|보유\s*지분\s*가치|배우자|가족|부모님|부모\s*부양|교육비|시장\s*뉴스|단기\s*이슈|민감|예민|꼼꼼|의심|성격|급함|질문|설명\s*선호|의사결정|심리|성향|모니터링|관리\s*시간|기존\s*PB|PB\s*서비스|불만족)/i;
   return splitMemoClauses(text)
     .filter((clause) => importantPattern.test(clause))
     .map((clause) => clause.trim())
     .filter(Boolean);
+}
+
+function uniqueOtherMeaningKey(value: string) {
+  const compact = value.replace(/\s+/g, "");
+  if (/크게흔들리지않|민감하지않|예민하지않/.test(compact)) return "market-stable";
+  if (/빠르지않|급하지않|속도가빠르지않/.test(compact)) return "not-fast-decision";
+  if (/시장뉴스|단기이슈|민감|예민/.test(compact)) return "market-sensitivity";
+  if (/의사결정.*빠|결정.*빠|성격.*급|급함/.test(compact)) return "fast-decision";
+  if (/꼼꼼|질문.*많|의심|충분한설명|설명선호/.test(compact)) return "explanation-detail";
+  if (/배우자/.test(compact)) return "spouse-influence";
+  if (/가족|자녀|교육비/.test(compact)) return "family-education";
+  if (/부모|부양|의료비|돌봄/.test(compact)) return "parent-support";
+  if (/레버리지|급등주|손실|수익률.*훼손|망가진/.test(compact)) return "past-loss";
+  if (/벤치마크|포트폴리오.*부진|수익률.*낮/.test(compact)) return "portfolio-underperformance";
+  if (/모니터링|관리시간|본업이바빠|주도주편입/.test(compact)) return "monitoring-time";
+  if (/기존PB|PB서비스|불만족/.test(compact)) return "pb-experience";
+  return compact.replace(/[^\p{Script=Hangul}a-zA-Z0-9]/gu, "").slice(0, 36);
+}
+
+function hasNegatedTrait(compactClause: string, traitPatterns: RegExp[]) {
+  const negativePattern = /않|아니|아님|없음|없는|없다|적음|적은|낮음|낮은|덜함|덜한|크지않|많지않|높지않|강하지않/;
+  if (!negativePattern.test(compactClause)) return false;
+  return traitPatterns.some((pattern) => pattern.test(compactClause));
+}
+
+function summarizeQualitativeClause(clause: string) {
+  const compact = clause.replace(/\s+/g, "");
+  const marketTraitPatterns = [/시장뉴스/, /단기이슈/, /민감/, /예민/];
+  const fastDecisionTraitPatterns = [/의사결정.*빠/, /결정.*빠/, /성격.*급/, /급함/, /급하/];
+  const explanationTraitPatterns = [/의심/, /질문.*많/];
+
+  if (hasNegatedTrait(compact, marketTraitPatterns)) return "시장 뉴스와 단기 이슈에 크게 흔들리지 않는 편";
+  if (/시장\s*뉴스|단기\s*이슈|민감|예민/.test(clause)) return "시장 뉴스와 단기 이슈에 민감하게 반응";
+  if (hasNegatedTrait(compact, fastDecisionTraitPatterns)) return "투자 의사결정 속도가 빠르지 않은 편";
+  if (/의사결정.*빠|결정.*빠|성격.*급|급함/.test(clause)) return "투자 의사결정 속도가 빠름";
+  if (/꼼꼼/.test(clause)) return "투자 의사결정 전 정보와 근거를 꼼꼼히 확인하는 성향";
+  if (hasNegatedTrait(compact, explanationTraitPatterns)) return "";
+  if (/의심|질문.*많|충분한\s*설명|설명\s*선호/.test(clause)) return "투자 결정 전 충분한 설명과 근거를 선호";
+  if (/배우자/.test(clause)) return "배우자의 투자 의사결정 영향력이 큰 편";
+  if (/자녀.*교육비|교육비|유학/.test(clause)) return "자녀 교육비 관련 재무 부담 또는 지출 계획 존재";
+  if (/부모님|부모\s*부양|부양|고령\s*부모|돌봄|의료비/.test(clause)) return "부모 부양 또는 고령 부모 관련 재무 이슈 가능성";
+  if (/레버리지|급등주|손실|망가진|수익률.*훼손/.test(clause)) return "과거 공격적 투자 또는 레버리지 투자로 손실 경험 존재";
+  if (/벤치마크|포트폴리오.*부진|수익률.*낮|불만족/.test(clause)) return "기존 포트폴리오 성과에 대한 불만 또는 개선 니즈 존재";
+  if (/모니터링|관리\s*시간|본업이\s*바빠|주도주\s*편입/.test(clause)) return "자산 모니터링 또는 적극적 투자 관리 시간이 부족한 편";
+  if (/기존\s*PB|PB\s*서비스|새로운\s*PB|PB.*불만/.test(clause)) return "기존 PB 서비스 이용 경험 또는 불만족 맥락 존재";
+  return "";
+}
+
+function mergeUniqueOtherValues(...sources: unknown[]) {
+  const byMeaning = new Map<string, string>();
+  sources
+    .flatMap((source) => typeof source === "string" ? source.split(/\n/) : [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const key = uniqueOtherMeaningKey(item);
+      if (!byMeaning.has(key)) byMeaning.set(key, item);
+    });
+  return Array.from(byMeaning.values()).join("\n");
+}
+
+function enrichUniqueOther(data: ExtractionEnvelope, originalText: string) {
+  const candidates = [
+    ...splitMemoClauses(originalText),
+    ...(data.notes ?? []),
+    ...(data.unmapped ?? []),
+  ];
+  const summarized = candidates
+    .map(summarizeQualitativeClause)
+    .filter(Boolean);
+  if (!summarized.length) return data;
+  data.extracted.rrttllu.uniqueOther = mergeUniqueOtherValues(data.extracted.rrttllu.uniqueOther, summarized.join("\n"));
+  return data;
 }
 
 function cleanAssetCandidate(value: string) {
@@ -407,6 +480,13 @@ function mockExtract(note: string): ExtractionEnvelope {
     const current = typeof result.extracted.rrttllu.uniqueOther === "string" ? result.extracted.rrttllu.uniqueOther : "";
     result.extracted.rrttllu.uniqueOther = Array.from(new Set([current, ...qualitativeUnique].filter(Boolean))).join("\n");
   }
+  const personalContext = splitMemoClauses(text)
+    .map(summarizeQualitativeClause)
+    .filter(Boolean);
+  if (personalContext.length) {
+    const current = typeof result.extracted.rrttllu.uniqueOther === "string" ? result.extracted.rrttllu.uniqueOther : "";
+    result.extracted.rrttllu.uniqueOther = Array.from(new Set([current, ...personalContext].filter(Boolean))).join("\n");
+  }
   if (/개인\s*포폴|개인\s*포트폴리오|기존\s*포트폴리오|망가진|리밸런싱|장기보유|경쟁사 주식/.test(text)) {
     result.extracted.rrttllu.holdingOrDisposalPlan =
       extractClauseContaining(
@@ -435,7 +515,7 @@ function mockExtract(note: string): ExtractionEnvelope {
     return !mappedValues.some((value) => typeof value === "string" && (value.includes(note) || note.includes(value)));
   });
 
-  return result;
+  return enrichUniqueOther(result, text);
 }
 
 function buildPrompt(note: string) {
@@ -480,6 +560,15 @@ function buildPrompt(note: string) {
     "For Tax, capture tax concerns including financial income comprehensive taxation, gift/inheritance tax, capital gains tax, and general tax reduction needs.",
     "For Legal, capture employee trading restrictions, insider/self-company stock restrictions, pre-trading restrictions, and other institutional limits.",
     "Ambiguous but important qualitative facts must go into extracted.rrttllu.uniqueOther and also notes if not otherwise represented. Examples of patterns, not hardcoded examples: company growth increased stake value, concentration risk management, personal portfolio underperformed benchmark, main occupation made active management difficult.",
+    "Customer-specific qualitative context that does not naturally fit the financial, Return, Risk, Time Horizon, Tax, Liquidity, Legal, preferred assets, avoided assets, or existing asset plan fields must be summarized into extracted.rrttllu.uniqueOther.",
+    "This includes decision-making influence from spouse/family, sensitivity to market news or short-term issues, impatient or fast decision style, many questions, preference for detailed explanation, parents' age or family finance issues, behavioral tendencies, consultation style, psychological concerns, and other personal circumstances.",
+    "The following qualitative categories must be actively checked and summarized into extracted.rrttllu.uniqueOther when present: customer personality, decision-making style, consultation response style, market-news sensitivity, investment psychology, past investment failure, dissatisfaction with current portfolio, family/spouse influence, child education burden, parent support possibility, lack of asset monitoring time, prior PB service experience or dissatisfaction.",
+    "Do not leave those qualitative facts only in notes or unmapped. If they are important for PB counseling but do not fit another form field, extracted.rrttllu.uniqueOther must contain concise Korean PB notes separated by new lines.",
+    "Good uniqueOther style examples of form only, not hardcoded content: '시장 뉴스와 단기 이슈에 민감하게 반응', '투자 의사결정 속도가 빠름', '배우자의 투자 의사결정 영향력이 큰 편', '과거 레버리지 투자로 손실 경험 존재'.",
+    "Handle Korean negation accurately before summarizing qualitative traits. Do not infer a positive trait from a negated phrase.",
+    "Examples of negation to respect: 급하지 않음, 민감하지 않음, 예민하지 않음, 의심이 많지 않음, 질문이 많지 않음, 영향력이 크지 않음, 경험 없음, 관심 없음.",
+    "If a trait is negated, either omit it from uniqueOther or summarize the neutral/opposite meaning. Never store '투자 의사결정 속도가 빠름' for '성격이 급하지 않음', and never store '시장 뉴스와 단기 이슈에 민감하게 반응' for '시장 뉴스에 민감하지 않음'.",
+    "Do not merely copy those clauses. Rewrite them as concise PB-use notes in Korean, preserving meaning and avoiding overstatement.",
     "notes must include every important candidate clause that was not fully represented in extracted or inferred.",
     "unmapped must include important candidate clauses that do not fit any current field.",
     `Memo:\n${note}`,
@@ -525,22 +614,23 @@ async function callGemini(note: string): Promise<GeminiExtractionResult> {
     console.log("Gemini raw text before JSON.parse", text);
     try {
       const parsed = JSON.parse(text) as ExtractionEnvelope;
-      console.log("Gemini parsed extraction before client mapping", parsed);
-      if (isEmptyExtraction(parsed)) {
+      const enriched = enrichUniqueOther(parsed, note);
+      console.log("Gemini parsed extraction before client mapping", enriched);
+      if (isEmptyExtraction(enriched)) {
         console.warn("Gemini returned an empty extraction object", {
           rawTextBeforeParse: text,
-          parsedBeforeMapping: parsed,
+          parsedBeforeMapping: enriched,
           smartInput: note,
         });
       }
       return {
         source: "gemini",
-        data: parsed,
+        data: enriched,
         debug: {
           prompt,
           rawResponse: result,
           rawTextBeforeParse: text,
-          parsedBeforeMapping: parsed,
+          parsedBeforeMapping: enriched,
         },
       };
     } catch (parseError) {
