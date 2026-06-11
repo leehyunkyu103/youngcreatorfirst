@@ -735,6 +735,12 @@ async function callGemini(note: string, clientEstimatedUsageToday?: number): Pro
   let result: unknown;
 
   try {
+    console.info("[Gemini Call] extract-customer", {
+      smartInputLength: note.length,
+      trimmedLength: note.trim().length,
+      estimatedUsageToday: clientEstimatedUsageToday,
+      timestamp: new Date().toISOString(),
+    });
     console.log("Gemini extraction prompt", prompt);
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
       method: "POST",

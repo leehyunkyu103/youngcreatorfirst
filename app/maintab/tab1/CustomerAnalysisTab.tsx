@@ -272,8 +272,7 @@ function SmartInputCard() {
           fallbackReason: cached.result.fallbackReason,
         });
         applySmartExtraction(toSmartExtractionPayload(cached.result.data));
-        const remaining = Math.max(geminiDailyLimit - usageToday, 0);
-        setMessage(`동일한 Smart Input 원문이라 이전 추출 결과를 재사용했습니다. 오늘 Gemini 추정 사용량: ${usageToday}/${geminiDailyLimit}회 · 추정 잔여 횟수: ${remaining}회`);
+        setMessage("동일한 Smart Input 원문이라 이전 추출 결과를 재사용했습니다.");
         return;
       }
     } catch (cacheError) {
@@ -283,6 +282,11 @@ function SmartInputCard() {
     setMessage("");
     try {
       const estimatedUsageToday = readGeminiUsageToday();
+      console.info("[Gemini Call Trigger] extract-customer", {
+        customerId: selectedCustomer,
+        smartInputLength: note.length,
+        estimatedUsageToday,
+      });
       const response = await fetch("/api/extract-customer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -323,14 +327,12 @@ function SmartInputCard() {
       if (result.source === "gemini") {
         const nextUsage = incrementGeminiUsageToday();
         setUsageToday(nextUsage);
-        const remaining = Math.max(geminiDailyLimit - nextUsage, 0);
-        setMessage(`Gemini 추출 결과를 입력값에 반영했습니다. 오늘 Gemini 추정 사용량: ${nextUsage}/${geminiDailyLimit}회 · 추정 잔여 횟수: ${remaining}회`);
+        setMessage("");
       } else if (result.fallbackReason === "rate_limit") {
         const serverUsage = typeof result.estimatedUsageToday === "number" ? result.estimatedUsageToday : geminiDailyLimit;
         setUsageToday(serverUsage);
         writeGeminiUsageToday(serverUsage);
-        const retryText = typeof result.retryDelay === "number" ? ` 약 ${result.retryDelay}초 후 다시 시도할 수 있습니다.` : "";
-        setMessage(`Gemini 무료 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.${retryText} Gemini 요청 한도 초과로 임시 추출 결과를 사용했습니다. 오늘 Gemini 추정 사용량: ${serverUsage}/${result.quotaLimit ?? geminiDailyLimit}회 · 추정 잔여 횟수: ${result.estimatedRemainingToday ?? 0}회`);
+        setMessage("gemini_rate_limit");
       } else {
         setMessage("Mock Parser로 추출 가능한 항목을 반영했습니다.");
       }
@@ -382,10 +384,22 @@ function SmartInputCard() {
             placeholder="고객 정보와 니즈를 자연어로 입력합니다."
             onChange={(e) => setSmartInputNote(e.target.value)}
           />
-          {message ? <p className={`mt-2 text-sm font-bold ${message.includes("실패") ? "text-red-700" : "text-yellow-900"}`}>{message}</p> : null}
-          <p className="mt-2 text-xs font-bold text-yellow-800">
-            오늘 Gemini 추정 사용량: {usageToday}/{geminiDailyLimit}회 · 추정 잔여 횟수: {Math.max(geminiDailyLimit - usageToday, 0)}회
-          </p>
+          {message === "gemini_rate_limit" ? (
+            <div className="mt-2 space-y-1">
+              <p className="text-sm font-extrabold text-yellow-900">■ Gemini 무료 요청 한도를 초과했습니다. 내일 다시 시도해주세요.</p>
+              <p className="text-xs font-bold text-yellow-800">
+                오늘 Gemini 추정 사용량: {usageToday}/{geminiDailyLimit}회 · 추정 잔여 횟수: {Math.max(geminiDailyLimit - usageToday, 0)}회
+              </p>
+              <p className="text-sm font-extrabold text-yellow-900">■ Gemini 요청 한도 초과로 임시 추출 결과를 사용했습니다.</p>
+            </div>
+          ) : message ? (
+            <p className={`mt-2 text-sm font-bold ${message.includes("실패") ? "text-red-700" : "text-yellow-900"}`}>{message}</p>
+          ) : null}
+          {message !== "gemini_rate_limit" ? (
+            <p className="mt-2 text-xs font-bold text-yellow-800">
+              오늘 Gemini 추정 사용량: {usageToday}/{geminiDailyLimit}회 · 추정 잔여 횟수: {Math.max(geminiDailyLimit - usageToday, 0)}회
+            </p>
+          ) : null}
         </div>
         <div className="grid content-start gap-2 lg:pt-10">
           <button
@@ -763,6 +777,21 @@ function AdvisoryGuideSection({
   );
 }
 
+function UniqueOtherReferenceSection({ value }: { value: string }) {
+  const displayValue = value.trim() || "입력된 기타 참고 정보가 없습니다.";
+  return (
+    <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+      <h3 className="text-base font-extrabold text-navy">[4] (참조) Unique Circumstances - 기타</h3>
+      <p className="mt-2 text-xs font-bold leading-5 text-amber-700">
+        AI 재분류나 요약 없이, Unique Circumstances의 Q. 기타 입력 내용을 PB 참고용으로 그대로 표시합니다.
+      </p>
+      <div className="mt-3 whitespace-pre-wrap rounded-lg border border-amber-100 bg-white px-4 py-3 text-sm font-semibold leading-6 text-slate-700">
+        {displayValue}
+      </div>
+    </section>
+  );
+}
+
 function AiConsultingGuideCard({
   guide,
   loading,
@@ -821,6 +850,7 @@ function AiConsultingGuideCard({
           </div>
         </AdvisoryGuideSection>
         <AdvisoryGuideSection title="[3] 설명 방식 제안" lines={guide.explanation.lines} />
+        <UniqueOtherReferenceSection value={formData.rrttllu.uniqueOther} />
       </div>
     </section>
   );
@@ -878,13 +908,25 @@ export default function CustomerAnalysisTab() {
 
   useEffect(() => {
     if (activeSubTab !== "guide") return;
-    if (lastGuideSignature === advisoryGuideSignature) return;
+    if (lastGuideSignature === advisoryGuideSignature) {
+      console.info("[Gemini Call Skip] advisory-guide cached signature", {
+        customerId: selectedCustomer,
+        signatureLength: advisoryGuideSignature.length,
+      });
+      return;
+    }
 
     let cancelled = false;
     async function generateGuide() {
       setAdvisoryGuideLoading(true);
       setAdvisoryGuideError("");
       try {
+        console.info("[Gemini Call Trigger] advisory-guide", {
+          customerId: selectedCustomer,
+          signatureLength: advisoryGuideSignature.length,
+          smartInputLength: formData.smartInputNote.length,
+          uniqueOtherLength: formData.rrttllu.uniqueOther.length,
+        });
         const response = await fetch("/api/generate-advisory-guide", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

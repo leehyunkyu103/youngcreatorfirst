@@ -9,6 +9,7 @@ type AdvisoryGuide = {
 };
 
 const fallbackLine = "현재 입력된 정보 기준으로 특별한 유의사항이 감지되지 않았습니다.";
+const noConflictLine = "현재 입력된 정보 기준으로 특별한 상충 정보가 감지되지 않았습니다.";
 
 const responseSchema = {
   type: "object",
@@ -88,6 +89,32 @@ function ratio(part: number | null, total: number | null) {
   return part / total;
 }
 
+function extractMaxPercent(value: unknown): number | null {
+  const numbers = text(value).match(/\d+(?:\.\d+)?/g)?.map(Number).filter(Number.isFinite) ?? [];
+  return numbers.length ? Math.max(...numbers) : null;
+}
+
+function horizonMinYears(value: unknown): number | null {
+  const raw = text(value);
+  if (!raw) return null;
+  if (raw.includes("5년 이상")) return 5;
+  if (raw.includes("3~5년")) return 3;
+  if (raw.includes("2~3년")) return 2;
+  if (raw.includes("1~2년")) return 1;
+  if (raw.includes("1년 미만")) return 0;
+  const match = raw.match(/(\d+(?:\.\d+)?)\s*년/);
+  return match ? Number(match[1]) : null;
+}
+
+function earliestUseYear(value: unknown): number | null {
+  const raw = text(value);
+  if (!raw) return null;
+  const yearMatches = [...raw.matchAll(/(\d+(?:\.\d+)?)\s*년\s*(?:내|후|뒤|이내)?/g)].map((match) => Number(match[1]));
+  const monthMatches = [...raw.matchAll(/(\d+(?:\.\d+)?)\s*개월/g)].map((match) => Number(match[1]) / 12);
+  const values = [...yearMatches, ...monthMatches].filter(Number.isFinite);
+  return values.length ? Math.min(...values) : null;
+}
+
 function includesAny(source: string, words: string[]) {
   return words.some((word) => source.includes(word));
 }
@@ -140,20 +167,29 @@ function mergeGuideLines(base: GuideLine[], extra: GuideLine[]) {
 function lineTopic(value: string) {
   const compact = text(value).replace(/\s+/g, "");
   if (!compact) return "";
+  if (/상충정보가감지되지않/.test(compact)) return "no-conflict";
+  if (/기대수익률|안정수익|예금.?채권|원금보존.*수익률|수익률.*원금보존/.test(compact)) return "expected-return-stability-conflict";
+  if (/낮은위험선호|저위험|초저위험|고위험자산|가상자산|암호화폐|레버리지.*양립|선호자산의위험도/.test(compact)) return "low-risk-high-risk-asset-conflict";
+  if (/투자자산비중|고수익추구목표|현재투자자산활용/.test(compact)) return "investment-asset-ratio-conflict";
+  if (/투자지식수준|고위험상품경험|실제이해도/.test(compact)) return "knowledge-experience-conflict";
+  if (/짧은투자기간|1년미만|장기보유|지속매수/.test(compact)) return "short-horizon-strategy-conflict";
+  if (/목돈사용계획.*레버리지|레버리지.*목돈사용계획|자금사용시점과손실가능성/.test(compact)) return "cash-use-high-risk-asset-conflict";
   if (/자산증식단계|중장기목표|주택구입|결혼|자녀계획|은퇴준비|상속.?증여/.test(compact)) return "life-stage-goals";
   if (/유학|교육비|외화자산|의원|고정비|포트폴리오관리/.test(compact)) return "client-specific-followup";
   if (/투자기간|투자시계|TimeHorizon|목돈|주택|유학|자금사용시점/.test(compact)) return "time-horizon-cash-use";
-  if (/기대수익률|위험등급|손실감내|원금보존|공격적수익|위험감내/.test(compact)) return "return-risk-alignment";
+  if (/위험등급|손실감내|원금보존|공격적수익|위험감내/.test(compact)) return "return-risk-alignment";
   if (/필요자금|비상예비|유동성|확정지출|생활비|현금흐름/.test(compact)) return "liquidity-planning";
   if (/성과급|비정기소득|스톡옵션|자금유입|매각대금|지분매각/.test(compact)) return "irregular-income";
   if (/추가투자|신규자금|단기손실|투자여력/.test(compact)) return "additional-investment-capacity";
   if (/세금|절세|종합과세|증여|세후수익률/.test(compact)) return "tax-strategy";
+  if (/과거.*손실|큰손실|손실경험|급등주|과도한레버리지|레버리지.*손실|포트폴리오.*훼손|수익률.*망가|리스크통제|위험관리/.test(compact)) return "past-loss-risk-management";
+  if (/포트폴리오.*수익률.*낮|벤치마크.*낮|수익률.*부진|수익률.*불만|포트폴리오.*불만|개선방향|저조원인/.test(compact)) return "portfolio-performance-improvement";
+  if (/모니터링|관리시간|본업이바빠|주도주편입|사후관리|정기점검/.test(compact)) return "monitoring-service-needs";
   if (/크게흔들리지않|민감하지않|예민하지않/.test(compact)) return "market-stable-communication";
   if (/빠르지않|급하지않|속도가빠르지않/.test(compact)) return "deliberate-decision-communication";
   if (/시장뉴스|단기이슈|민감|예민/.test(compact)) return "market-sensitive-communication";
   if (/의사결정|결정.*빠|성격|급함|속도/.test(compact)) return "fast-decision-communication";
   if (/꼼꼼|의심|질문|설명|근거|가정조건/.test(compact)) return "evidence-communication";
-  if (/모니터링|관리시간|본업이바빠|주도주편입/.test(compact)) return "low-maintenance-communication";
   if (/기존PB|PB서비스|사후관리|불만족/.test(compact)) return "pb-service-communication";
   if (/배우자|가족|자녀|부모/.test(compact)) return "family-influence";
   if (/선호자산|기피자산|나스닥|암호화폐|예금|ETF|주식|채권/.test(compact)) return "asset-preference";
@@ -161,9 +197,9 @@ function lineTopic(value: string) {
 }
 
 function preferredSectionForTopic(topic: string, fallback: keyof AdvisoryGuide) {
-  if (["time-horizon-cash-use", "return-risk-alignment"].includes(topic)) return "conflicts";
-  if (["life-stage-goals", "client-specific-followup", "liquidity-planning", "irregular-income", "additional-investment-capacity"].includes(topic)) return "followUps";
-  if (["tax-strategy", "market-stable-communication", "market-sensitive-communication", "deliberate-decision-communication", "fast-decision-communication", "evidence-communication", "low-maintenance-communication", "pb-service-communication", "family-influence", "asset-preference"].includes(topic)) return "explanation";
+  if (["return-risk-alignment"].includes(topic)) return "conflicts";
+  if (["time-horizon-cash-use", "life-stage-goals", "client-specific-followup", "liquidity-planning", "irregular-income", "additional-investment-capacity"].includes(topic)) return "followUps";
+  if (["tax-strategy", "market-stable-communication", "market-sensitive-communication", "deliberate-decision-communication", "fast-decision-communication", "evidence-communication", "past-loss-risk-management", "portfolio-performance-improvement", "monitoring-service-needs", "low-maintenance-communication", "pb-service-communication", "family-influence", "asset-preference"].includes(topic)) return "explanation";
   return fallback;
 }
 
@@ -233,10 +269,42 @@ function memoTopic(title: string) {
   return [compact.replace(/[^\p{Script=Hangul}a-zA-Z0-9]/gu, "").slice(0, 32), title];
 }
 
-function memoItemsToCheckpoints(lines: GuideLine[]) {
+function sanitizeMemoItems(items: string[], payload?: any) {
+  const financial = payload?.formData?.financial ?? {};
+  const rrttllu = payload?.formData?.rrttllu ?? {};
+  const hasRegularCashflow = Boolean(text(rrttllu.regularCashflowNeed));
+  const hasTimeHorizon = Boolean(text(rrttllu.timeHorizon));
+  const hasExpectedReturn = Boolean(text(rrttllu.expectedReturn));
+  const hasEmergencyReserve = Boolean(text(rrttllu.emergencyReservePlan));
+  const hasTotalAssets = Boolean(text(financial.totalAssets));
+
+  return items.filter((item) => {
+    const compact = item.replace(/\s+/g, "");
+    if (hasRegularCashflow && /월필요현금흐름|정기현금흐름|생활비규모/.test(compact)) return false;
+    if (hasTimeHorizon && /투자기간$|투자기간확인|투자시계/.test(compact)) return false;
+    if (hasExpectedReturn && /기대수익률/.test(compact)) return false;
+    if (hasEmergencyReserve && /비상예비자금규모|비상예비.*금액/.test(compact)) return false;
+    if (hasTotalAssets && /총자산규모/.test(compact)) return false;
+    return true;
+  });
+}
+
+function sanitizeGuideMemoItems(guide: AdvisoryGuide, payload?: any): AdvisoryGuide {
+  const lines = guide.followUps.lines.map((line) => ({
+    ...line,
+    memoItems: sanitizeMemoItems(line.memoItems ?? [], payload).slice(0, 1),
+  }));
+  return {
+    conflicts: guide.conflicts,
+    followUps: { lines, checkpoints: memoItemsToCheckpoints(lines, payload) },
+    explanation: guide.explanation,
+  };
+}
+
+function memoItemsToCheckpoints(lines: GuideLine[], payload?: any) {
   const byTopic = new Map<string, string>();
   lines.forEach((line) => {
-    (line.memoItems ?? []).forEach((item) => {
+    sanitizeMemoItems(line.memoItems ?? [], payload).slice(0, 1).forEach((item) => {
       const trimmed = item.trim();
       if (!trimmed) return;
       const [topic, title] = memoTopic(trimmed);
@@ -282,7 +350,7 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
     followUps.push({
       text: `고객은 ${displayAge}로 자산 보전과 현금흐름 관리의 중요도가 높아질 수 있습니다. 상속·증여 계획과 정기 현금흐름 필요 규모를 함께 확인하는 것이 좋습니다.`,
       highlights: ["자산 보전", "상속·증여 계획"],
-      memoItems: ["상속·증여 대상 및 시점", "월 필요 현금흐름", "자산 승계 우선순위"],
+      memoItems: ["상속·증여 대상 및 시점", "자산 승계 우선순위"],
     });
     checkpoints.push({ id: "succession-cashflow", title: "상속·증여 및 현금흐름 계획" });
   }
@@ -298,13 +366,20 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
   }
   if (includesAny(job, ["전문직", "의사", "치과", "변호사", "회계사", "세무사"])) {
     followUps.push({
-      text: `고객은 '${job}'으로 소득 수준과 세금 부담이 함께 커질 수 있습니다. 절세 전략과 현금흐름 관리 방식을 함께 점검하는 것이 좋습니다.`,
-      highlights: ["절세 전략", "현금흐름 관리"],
-      memoItems: includesAny(job, ["치과", "의사"]) ? ["의원 월 고정비 규모", "월평균 잉여현금흐름", "절세 우선순위"] : ["월평균 잉여현금흐름", "절세 우선순위"],
+      text: `고객은 '${job}'으로 소득 수준, 세금 부담, 사업 확장 관련 자금 수요가 함께 발생할 수 있습니다. 향후 확장 계획이나 고정비 구조가 투자 가능 자금에 미치는 영향을 확인하는 것이 좋습니다.`,
+      highlights: ["전문직", "사업 확장", "투자 가능 자금"],
+      memoItems: includesAny(job, ["치과", "의사"]) ? ["의원 월 고정비 규모"] : ["사업 확장 관련 자금 수요"],
     });
     checkpoints.push({ id: "professional-tax-cashflow", title: "전문직 절세·현금흐름 관리" });
   }
-  if (includesAny(job + allQualitative, ["창업", "스타트업", "대표", "지분", "스톡옵션"])) {
+  if (includesAny(job + allQualitative, ["개인사업자", "자영업", "사업 운영", "의원 운영"])) {
+    followUps.push({
+      text: `고객 입력에는 개인사업 또는 사업 운영 맥락이 있습니다. 사업 운영 자금과 투자 가능 자금이 섞이지 않도록 현금흐름 변동성과 운전자금 필요 규모를 확인하는 것이 좋습니다.`,
+      highlights: ["사업 운영 자금", "투자 가능 자금"],
+      memoItems: ["사업 운영 자금과 투자 가능 자금 구분"],
+    });
+  }
+  if (includesAny(job + allQualitative, ["창업", "스타트업", "지분", "스톡옵션", "회사 지분", "보유 지분"])) {
     followUps.push({
       text: `고객의 직업 또는 Smart Input에 창업·지분·스톡옵션 관련 맥락이 있습니다. 특정 자산 집중 위험과 향후 자금 유입 이후 투자 계획을 확인하는 것이 좋습니다.`,
       highlights: ["특정 자산 집중 위험", "자금 유입 이후 투자 계획"],
@@ -322,6 +397,10 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
   const realEstateRatio = ratio(realEstate, totalAssets);
   const debtRatio = ratio(debt, totalAssets);
   const irregularRatio = ratio(irregularIncome, totalAssets);
+  const annualIncome = parseKoreanAmount(financial.annualFixedIncome);
+  const monthlyExpense = parseKoreanAmount(financial.monthlyFixedExpense);
+  const irregularIncomeRatioToAnnualIncome = ratio(irregularIncome, annualIncome);
+  const annualizedExpenseRatio = ratio(monthlyExpense ? monthlyExpense * 12 : null, annualIncome);
 
   if (financialRatio !== null && financialRatio >= 0.6) {
     followUps.push({
@@ -339,6 +418,13 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
     });
     checkpoints.push({ id: "real-estate-liquidity", title: "부동산 중심 자산의 유동성 확보" });
   }
+  if (financialRatio !== null && financialRatio < 0.2 && realEstateRatio !== null && realEstateRatio >= 0.7) {
+    followUps.push({
+      text: `총자산 대비 금융자산 비중은 낮고 부동산 비중은 높은 구조로 보입니다. 부동산 중심 자산 구조에서는 투자 기회보다 유동성 확보 가능성이 먼저 확인되어야 할 수 있습니다.`,
+      highlights: ["금융자산 비중", "부동산 비중", "유동성 확보"],
+      memoItems: ["부동산 중심 자산의 유동성 확보"],
+    });
+  }
   if (debtRatio !== null && debtRatio >= 0.3) {
     followUps.push({
       text: `부채는 '${financial.debt}', 총자산은 '${financial.totalAssets}'로 입력되어 총자산 대비 부채 부담이 큰 편일 수 있습니다. 상환 계획과 추가 차입 가능성을 확인하는 것이 좋습니다.`,
@@ -355,6 +441,20 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
     });
     checkpoints.push({ id: "irregular-income-plan", title: "비정기 소득 유입 후 투자 계획" });
   }
+  if (irregularIncomeRatioToAnnualIncome !== null && irregularIncomeRatioToAnnualIncome >= 0.5) {
+    followUps.push({
+      text: `향후 예상 비정기소득 '${financial.irregularIncome}'은 연 고정소득 '${financial.annualFixedIncome}' 대비 큰 비중으로 보입니다. 실제 유입 시점과 활용 계획에 따라 투자 시작 시점과 절세 전략이 달라질 수 있습니다.`,
+      highlights: ["비정기소득", "연 고정소득", "활용 계획"],
+      memoItems: ["비정기 소득 지급 시점 및 사용 계획"],
+    });
+  }
+  if (annualizedExpenseRatio !== null && annualizedExpenseRatio >= 0.6) {
+    followUps.push({
+      text: `월 고정지출 '${financial.monthlyFixedExpense}'을 연 기준으로 환산하면 연 고정소득 '${financial.annualFixedIncome}' 대비 부담이 큰 편일 수 있습니다. 투자 여력과 현금흐름 안정성을 함께 점검하는 것이 좋습니다.`,
+      highlights: ["월 고정지출", "투자 여력", "현금흐름 안정성"],
+      memoItems: ["월평균 잉여현금흐름"],
+    });
+  }
   const requiredRatio = ratio(typeof liquidity.requiredAmount === "number" ? liquidity.requiredAmount : null, totalAssets);
   if (requiredRatio !== null && requiredRatio >= 0.5) {
     followUps.push({
@@ -365,20 +465,70 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
     checkpoints.push({ id: "liquidity-use-timing", title: "자금 사용 시점과 유동성 확보 계획" });
   }
 
-  if (rrttllu.returnObjective === "원금 보존 투자" && parseKoreanAmount(rrttllu.expectedReturn) === null && /\d/.test(text(rrttllu.expectedReturn))) {
+  const maxExpectedReturn = extractMaxPercent(rrttllu.expectedReturn);
+  const conservativeObjective = rrttllu.returnObjective === "원금 보존 투자" || text(rrttllu.returnObjective).includes("안정적");
+  const depositLikeObjective = /예금|채권이자|안정적 수익/.test(text(rrttllu.returnObjective));
+  if ((rrttllu.returnObjective === "원금 보존 투자" || depositLikeObjective) && maxExpectedReturn !== null && maxExpectedReturn >= 10) {
     conflicts.push({
-      text: `고객은 원금 보존 투자를 선택했지만 기대수익률 '${rrttllu.expectedReturn}'도 입력했습니다. 기대수익률과 위험 감내 수준이 일치하는지 확인하는 것이 좋습니다.`,
-      highlights: ["원금 보존 투자", `기대수익률 '${rrttllu.expectedReturn}'`],
+      text: `고객은 '${rrttllu.returnObjective}'를 선택했지만 기대수익률은 '${rrttllu.expectedReturn}'로 입력했습니다. 원금 보존 또는 예금·채권 수준의 안정 수익 선호와 10% 이상의 기대수익률은 동시에 충족되기 어려울 수 있어 실제 손실 감내 수준을 확인하는 것이 좋습니다.`,
+      highlights: [rrttllu.returnObjective, rrttllu.expectedReturn],
     });
-  }
-  const expectedNumbers = text(rrttllu.expectedReturn).match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-  const maxExpectedReturn = expectedNumbers.length ? Math.max(...expectedNumbers) : null;
-  if ((rrttllu.returnObjective === "원금 보존 투자" || rrttllu.returnObjective.includes("안정적")) && maxExpectedReturn !== null && maxExpectedReturn >= 10) {
+    checkpoints.push({ id: "return-risk-alignment", title: "기대수익률과 위험 감내 수준" });
+  } else if (conservativeObjective && maxExpectedReturn !== null && maxExpectedReturn >= 10) {
     conflicts.push({
       text: `고객은 '${rrttllu.returnObjective}'를 선택했지만 기대수익률은 '${rrttllu.expectedReturn}'로 입력했습니다. 안정 성향과 기대수익률의 현실성이 일치하는지 확인하는 것이 좋습니다.`,
       highlights: [rrttllu.returnObjective, rrttllu.expectedReturn],
     });
     checkpoints.push({ id: "return-risk-alignment", title: "기대수익률과 위험 감내 수준" });
+  }
+  const highRiskAssetCue = /레버리지|암호화폐|가상자산|급등주|고위험|파생|선물|옵션/.test(`${rrttllu.preferredAssets}\n${rrttllu.existingAssetPlan}\n${allQualitative}`);
+  const lowRiskCue = /초저위험|저위험|원금\s*보존|손실.*원하지|손실.*감내.*못|전액\s*환매/.test(`${risk.level}\n${rrttllu.returnObjective}\n${rrttllu.riskAttitude}\n${rrttllu.lossResponse}`);
+  if (lowRiskCue && highRiskAssetCue) {
+    conflicts.push({
+      text: `고객 응답에는 원금 보전 또는 낮은 위험 선호 신호가 있으나, Smart Input 또는 Unique에는 레버리지·가상자산·고위험 자산 관련 단서가 함께 나타납니다. 실제 손실 감내 수준과 선호 자산의 위험도가 양립 가능한지 확인하는 것이 좋습니다.`,
+      highlights: ["낮은 위험 선호", "고위험 자산"],
+    });
+  }
+  if ((rrttllu.returnObjective === "원금 보존 투자" || /원금 보전|원금 보존/.test(text(rrttllu.riskAttitude))) && rrttllu.investmentAssetRatio === "40% 이상") {
+    conflicts.push({
+      text: `고객은 원금 보존을 중요하게 보는 응답을 했지만 금융자산 중 투자자산 비중은 '${rrttllu.investmentAssetRatio}'으로 선택했습니다. 보수적 목표와 실제 투자자산 비중이 맞는지 확인하는 것이 좋습니다.`,
+      highlights: ["원금 보존", `투자자산 비중 ${rrttllu.investmentAssetRatio}`],
+    });
+  }
+  if (rrttllu.returnObjective === "적극적 수익 추구" && rrttllu.investmentAssetRatio === "10% 미만") {
+    conflicts.push({
+      text: `고객은 '${rrttllu.returnObjective}'를 선택했지만 금융자산 중 투자자산 비중은 '${rrttllu.investmentAssetRatio}'입니다. 고수익 추구 목표와 현재 투자자산 활용 수준 사이에 차이가 있을 수 있습니다.`,
+      highlights: [rrttllu.returnObjective, `투자자산 비중 ${rrttllu.investmentAssetRatio}`],
+    });
+  }
+  const investmentExperienceText = Array.isArray(rrttllu.investmentExperience) ? rrttllu.investmentExperience.join("\n") : text(rrttllu.investmentExperience);
+  const highRiskExperienceCount = [
+    /ELW|선물옵션|주식신용거래|파생상품 펀드/.test(investmentExperienceText),
+    /원금비보장ELS|고위험회사채|파생|레버리지|인버스/.test(`${investmentExperienceText}\n${rrttllu.derivativesExperience}\n${allQualitative}`),
+  ].filter(Boolean).length;
+  if (/전혀 모름|구별할 수 있음/.test(text(rrttllu.knowledgeLevel)) && highRiskExperienceCount >= 2) {
+    conflicts.push({
+      text: `고객은 투자 지식 수준을 '${rrttllu.knowledgeLevel}'로 응답했지만 고위험 상품 경험 단서가 복수로 나타납니다. 실제 이해도와 경험 상품의 위험 수준이 일치하는지 확인하는 것이 좋습니다.`,
+      highlights: [rrttllu.knowledgeLevel, "고위험 상품 경험"],
+    });
+  }
+  if (rrttllu.timeHorizon === "1년 미만" && maxExpectedReturn !== null && maxExpectedReturn >= 15) {
+    conflicts.push({
+      text: `고객은 투자기간을 '${rrttllu.timeHorizon}'으로 선택했지만 기대수익률은 '${rrttllu.expectedReturn}'입니다. 짧은 투자기간과 15% 이상의 기대수익률은 투자 전략 수립상 충돌할 수 있습니다.`,
+      highlights: [rrttllu.timeHorizon, rrttllu.expectedReturn],
+    });
+  }
+  if (text(rrttllu.lumpSumPlan) && /레버리지|인버스|고위험/.test(`${rrttllu.preferredAssets}\n${allQualitative}`)) {
+    conflicts.push({
+      text: `고객은 목돈 사용 계획 '${rrttllu.lumpSumPlan}'을 보유하면서 레버리지 또는 고위험 자산 선호도 함께 보입니다. 자금 사용 시점과 손실 가능성이 함께 관리 가능한지 확인하는 것이 좋습니다.`,
+      highlights: ["목돈 사용 계획", "레버리지 또는 고위험 자산"],
+    });
+  }
+  if (rrttllu.timeHorizon === "1년 미만" && /장기\s*보유|계속\s*보유|10년|5년 이상|지속\s*매수/.test(`${rrttllu.existingAssetPlan}\n${allQualitative}`)) {
+    conflicts.push({
+      text: `고객은 투자기간을 '${rrttllu.timeHorizon}'으로 선택했지만 기존 자산 계획에는 장기 보유 또는 지속 매수 맥락이 나타납니다. 단기 투자기간 응답과 실제 보유 계획이 같은 기준인지 확인하는 것이 좋습니다.`,
+      highlights: [rrttllu.timeHorizon, "장기 보유"],
+    });
   }
   if (rrttllu.lossResponse === "신규 자금 추가 투자") {
     followUps.push({
@@ -388,12 +538,20 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
     });
     checkpoints.push({ id: "additional-investment-capacity", title: "단기 손실 시 추가 투자 가능 금액" });
   }
-  if (rrttllu.timeHorizon === "5년 이상" && /1년|2년|3년|목돈|주택|유학|매입/.test(text(rrttllu.lumpSumPlan))) {
+  const useYear = earliestUseYear(`${rrttllu.lumpSumPlan}\n${rrttllu.regularCashflowNeed}`);
+  const horizonYears = horizonMinYears(rrttllu.timeHorizon);
+  if (horizonYears !== null && horizonYears >= 5 && useYear !== null && useYear <= 2 && requiredRatio !== null && requiredRatio >= 0.7) {
     conflicts.push({
-      text: `고객은 투자기간을 '${rrttllu.timeHorizon}'으로 선택했지만 목돈 사용 계획에는 '${rrttllu.lumpSumPlan}'이 입력되어 있습니다. 장기 투자 목표와 실제 자금 사용 시점이 충돌할 가능성이 있습니다.`,
-      highlights: [rrttllu.timeHorizon, rrttllu.lumpSumPlan],
+      text: `고객은 투자기간을 '${rrttllu.timeHorizon}'으로 선택했지만, ${useYear}년 내 사용 예정 자금이 총자산 대비 큰 비중으로 입력되어 있습니다. 장기 투자 계획과 단기 자금 사용 계획이 현실적으로 양립하기 어려울 수 있어 투자 가능 자금 범위를 확인하는 것이 좋습니다.`,
+      highlights: [rrttllu.timeHorizon, `${useYear}년 내 사용 예정 자금`],
     });
     checkpoints.push({ id: "investment-period-cash-use", title: "투자기간과 목돈 사용 시점" });
+  } else if (text(rrttllu.lumpSumPlan)) {
+    followUps.push({
+      text: `고객은 목돈 사용 계획으로 '${rrttllu.lumpSumPlan}'을 입력했습니다. 이 계획 자체는 상충 정보라기보다 투자 가능 자금과 상품 만기를 정하기 위한 상담 확인 항목으로 보는 것이 적절합니다.`,
+      highlights: ["목돈 사용 계획", "투자 가능 자금"],
+      memoItems: ["자금 사용 시점 및 우선순위"],
+    });
   }
   if (/유학|교육비/.test(text(rrttllu.lumpSumPlan) + allQualitative)) {
     followUps.push({
@@ -416,10 +574,106 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
       memoItems: ["기존 PB 서비스 불만족 사유"],
     });
   }
+  if ((rrttllu.giftingPlan === "검토 중" || rrttllu.giftingPlan === "있음") && horizonYears !== null && horizonYears <= 2) {
+    followUps.push({
+      text: `고객은 사전증여 계획을 '${rrttllu.giftingPlan}'으로 입력했고 투자기간은 '${rrttllu.timeHorizon}'입니다. 증여 예정 시점과 자금 회수 계획에 따라 상품 만기와 유동성 조건이 달라질 수 있습니다.`,
+      highlights: ["사전증여 계획", rrttllu.timeHorizon],
+      memoItems: ["증여 예정 시점 및 자금 회수 계획"],
+    });
+  }
+  const aggressiveCue = rrttllu.returnObjective === "적극적 수익 추구" || /초고위험|고위험/.test(text(risk.level)) || /고수익|큰 폭의 손실/.test(text(rrttllu.riskAttitude));
+  if (!text(rrttllu.emergencyReservePlan) && aggressiveCue) {
+    followUps.push({
+      text: `고객은 공격적 투자 성향을 보이지만 비상예비자금 계획은 입력되지 않았습니다. 시장 변동성 대응을 위해 별도 현금성 자산을 어떻게 확보할지 확인하는 것이 좋습니다.`,
+      highlights: ["공격적 투자 성향", "비상예비자금"],
+      memoItems: ["현금성 자산 확보 계획"],
+    });
+  }
+  const legalConstraints = Array.isArray(rrttllu.legalConstraints) ? rrttllu.legalConstraints.join("\n") : text(rrttllu.legalConstraints);
+  if (/임직원|매매 제한|내부 규정/.test(`${legalConstraints}\n${rrttllu.legalConstraintOther}\n${allQualitative}`)) {
+    followUps.push({
+      text: `고객에게 임직원 매매 제한 또는 사내 투자 규정 관련 제약이 있을 수 있습니다. 추천 가능 상품을 좁히기 위해 제한 대상 자산과 사내 승인 범위를 확인하는 것이 좋습니다.`,
+      highlights: ["임직원 매매 제한", "사내 투자 규정"],
+      memoItems: ["매매 제한 대상 및 가능 범위"],
+    });
+  }
+  if (/배당\s*ETF|배당주|income ETF/i.test(`${rrttllu.preferredAssets}\n${allQualitative}`) && rrttllu.globalTaxImportance === "매우 중요") {
+    followUps.push({
+      text: `고객은 배당형 자산 선호와 금융소득종합과세 절감 중요도를 함께 보입니다. 배당소득 규모에 따라 세후수익률과 종합과세 영향이 달라질 수 있습니다.`,
+      highlights: ["배당형 자산", "금융소득종합과세"],
+      memoItems: ["예상 배당소득 규모 및 종합과세 영향"],
+    });
+  }
+  if (/미국\s*성장주|나스닥|QQQ|SPY|미국.*ETF|해외주식/i.test(`${rrttllu.preferredAssets}\n${allQualitative}`) && rrttllu.foreignStockTaxImportance === "매우 중요") {
+    followUps.push({
+      text: `고객은 미국 성장주 또는 해외주식형 자산 선호와 해외주식 양도소득세 절감 니즈를 함께 보입니다. 투자 규모와 매매 계획에 따라 절세 전략이 달라질 수 있습니다.`,
+      highlights: ["미국 성장주", "해외주식 절세"],
+      memoItems: ["해외주식 투자 규모 및 절세 니즈"],
+    });
+  }
+  if (/예금|단기채|MMF|CMA/.test(text(rrttllu.avoidedAssets)) && requiredRatio !== null && requiredRatio >= 0.5) {
+    followUps.push({
+      text: `고객은 예금·단기채 등 유동성 자산을 피하고 싶어 하지만 총자산 대비 필요자금 비중은 높은 편입니다. 단기 자금 수요를 어떤 방식으로 충족할지 확인하는 것이 좋습니다.`,
+      highlights: ["유동성 자산 회피", "필요자금 비중"],
+      memoItems: ["단기 자금 수요 충족 방안"],
+    });
+  }
+  if (/암호화폐|가상자산|코인|비트코인|이더리움/.test(`${rrttllu.preferredAssets}\n${allQualitative}`)) {
+    followUps.push({
+      text: `고객은 암호화폐 또는 가상자산에 관심을 보입니다. 포트폴리오 내 허용 비중과 투자 목적을 확인해야 전체 위험 한도를 정하기 쉽습니다.`,
+      highlights: ["암호화폐", "포트폴리오 내 허용 비중"],
+      memoItems: ["가상자산 투자 목적 및 허용 비중"],
+    });
+  }
+  if (/공격적.*손실|큰\s*손실|손실\s*경험|급등주|과도한\s*레버리지|레버리지.*손실|포트폴리오.*훼손|수익률.*망가/.test(allQualitative)) {
+    followUps.push({
+      text: `Smart Input 또는 Unique 기타에는 공격적 투자나 레버리지 활용으로 과거 손실을 경험한 맥락이 나타납니다. 현재 투자 전략이 과거 손실 원인을 어떻게 보완하는지, 위험관리 기준이 실제로 마련되어 있는지 확인하는 것이 좋습니다.`,
+      highlights: ["과거 손실 경험", "위험관리 기준"],
+      memoItems: ["현재 투자 전략 및 위험관리 방식"],
+    });
+  }
+  if (/기존\s*포트폴리오.*수익률.*낮|포트폴리오.*수익률.*낮|벤치마크.*낮|수익률.*부진|수익률.*불만|포트폴리오.*불만/.test(allQualitative)) {
+    followUps.push({
+      text: `고객은 기존 포트폴리오 수익률이 낮거나 현재 포트폴리오에 대한 불만을 언급했습니다. 수익률 저조 원인이 자산배분, 시장 대응, 상품 선택, 관리 빈도 중 어디에 있는지 확인해야 개선 방향을 설명하기 쉽습니다.`,
+      highlights: ["포트폴리오 수익률", "개선 방향"],
+      memoItems: ["수익률 저조 원인 및 개선 방향"],
+    });
+  }
+  if (/모니터링|관리\s*시간\s*부족|관리할\s*시간|본업이\s*바빠|자주\s*못\s*봄|주도주\s*편입.*못/.test(allQualitative)) {
+    followUps.push({
+      text: `고객은 자산 모니터링 시간이 부족하거나 본업으로 인해 포트폴리오 관리가 제한되는 맥락을 보입니다. 상담 후 어떤 방식의 사후 관리와 점검 주기가 필요한지 확인하는 것이 좋습니다.`,
+      highlights: ["자산 모니터링 시간 부족", "사후 관리"],
+      memoItems: ["사후 관리 니즈 및 관리 방식"],
+    });
+  }
   if (rrttllu.globalTaxImportance === "매우 중요" || rrttllu.recentGlobalTaxSubject === "예" || /절세|종합과세|세금/.test(allQualitative)) {
     explanation.push({
       text: `고객은 금융소득종합과세 절감 중요도 '${rrttllu.globalTaxImportance || "미입력"}' 및 Smart Input의 세금 관련 맥락을 보유하고 있습니다. 상품 설명 시 기대수익률보다 세후수익률, 금융소득종합과세 영향, 절세 효과를 중심으로 설명하는 것이 효과적일 수 있습니다.`,
       highlights: ["세후수익률", "금융소득종합과세", "절세 효과"],
+    });
+  }
+  if (/잘 이해|스스로 의사결정/.test(text(rrttllu.knowledgeLevel)) && /3년 이상/.test(text(rrttllu.derivativesExperience))) {
+    explanation.push({
+      text: `고객은 금융상품 이해도가 높고 파생상품 투자 경험도 긴 편으로 응답했습니다. 기본 구조 설명을 길게 반복하기보다 주요 위험요인, 손실 발생 경로, 투자전략의 전제 조건을 중심으로 설명하는 방식이 적합할 수 있습니다.`,
+      highlights: ["금융상품 이해도", "주요 위험요인", "투자전략"],
+    });
+  }
+  if (/레버리지|인버스/.test(`${rrttllu.preferredAssets}\n${allQualitative}`)) {
+    explanation.push({
+      text: `고객은 레버리지형 자산에 관심을 보입니다. 수익 기회보다 복리 효과, 변동성 확대, 장기 보유 시 성과 왜곡 가능성을 먼저 설명하는 것이 투자 판단에 도움이 될 수 있습니다.`,
+      highlights: ["레버리지형 자산", "장기 보유 위험"],
+    });
+  }
+  if (/국채|우량\s*회사채|채권/.test(text(rrttllu.preferredAssets))) {
+    explanation.push({
+      text: `고객은 국채나 우량 회사채 성격의 자산을 선호합니다. 상품 설명 시 쿠폰수익만이 아니라 금리 변동에 따른 가격 변동과 현금흐름 안정성을 함께 설명하는 방식이 효과적일 수 있습니다.`,
+      highlights: ["금리 변동", "현금흐름 안정성"],
+    });
+  }
+  if (/달러\s*MMF|외화\s*MMF|USD\s*MMF/i.test(`${rrttllu.preferredAssets}\n${allQualitative}`)) {
+    explanation.push({
+      text: `고객은 달러 MMF 또는 외화 유동성 자산에 관심을 보입니다. 환율 변동, 단기 유동성, 원화 환산 수익률을 함께 설명하면 상품의 역할을 더 명확히 이해할 수 있습니다.`,
+      highlights: ["환율 변동", "단기 유동성"],
     });
   }
   if (hasNegatedTrait(allQualitative, marketSensitivityPatterns)) {
@@ -478,21 +732,23 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
 
   return {
     conflicts: { lines: uniqueLines(conflicts) },
-    followUps: { lines: uniqueLines(followUps), checkpoints: memoItemsToCheckpoints(uniqueLines(followUps)) },
+    followUps: { lines: uniqueLines(followUps), checkpoints: memoItemsToCheckpoints(uniqueLines(followUps), payload) },
     explanation: { lines: uniqueLines(explanation) },
   };
 }
 
-function mergeGuides(ruleGuide: AdvisoryGuide, aiGuide: AdvisoryGuide): AdvisoryGuide {
+function mergeGuides(ruleGuide: AdvisoryGuide, aiGuide: AdvisoryGuide, payload?: any): AdvisoryGuide {
   const sectionedLines = mergeSectionedLines(ruleGuide, aiGuide);
-  return {
-    conflicts: { lines: sectionedLines.conflicts },
+  const realConflictLines = sectionedLines.conflicts.filter((line) => line.text.trim() !== noConflictLine);
+  const conflictLines = realConflictLines.length ? realConflictLines : [{ text: noConflictLine }];
+  return sanitizeGuideMemoItems({
+    conflicts: { lines: conflictLines },
     followUps: {
       lines: sectionedLines.followUps,
-      checkpoints: memoItemsToCheckpoints(sectionedLines.followUps),
+      checkpoints: memoItemsToCheckpoints(sectionedLines.followUps, payload),
     },
     explanation: { lines: sectionedLines.explanation },
-  };
+  }, payload);
 }
 
 function normalizeGuide(value: unknown): AdvisoryGuide {
@@ -559,12 +815,25 @@ function buildPrompt(payload: unknown, ruleGuide: AdvisoryGuide) {
     "Good style: '고객은 투자기간을 5년 이상으로 선택했지만, 향후 5년 내 주택 매입 자금 8억 원 사용 계획도 입력했습니다. 장기 투자 목표와 자금 사용 시점이 충돌할 가능성이 있으므로 실제 투자 가능 자금을 확인하는 것이 좋습니다.'",
     "Return this exact JSON shape: { \"conflicts\": [{ \"text\": \"...\", \"highlights\": [\"...\"] }], \"followUps\": [{ \"text\": \"...\", \"highlights\": [\"...\"], \"memoItems\": [\"...\"] }], \"communicationGuides\": [{ \"text\": \"...\", \"highlights\": [\"...\"] }] }.",
     "conflicts: detect actual contradictions, mismatches, or simultaneously hard-to-satisfy conditions. Do not create PB memo items here.",
-    "followUps: each item must contain one evidence-rich text and memoItems derived ONLY from that same text. Do not create memoItems for anything not mentioned in followUps.text.",
+    "Rule detection stage is mandatory: compare the customer data against every condition from the Word-file knowledge base and collect all matching rules before writing. During detection, do not judge importance, summarize, or omit matches.",
+    "Classification stage: classify detected rules into exactly four outputs: conflicts, followUps, communicationGuides, and PB memoItems. The final response should integrate and deduplicate them, but the detection itself must be exhaustive.",
+    "Do NOT classify as conflicts merely because different information exists. These are NOT conflicts by themselves: aggressive investment preference + high expected return + high/very-high risk grade; 5+ year horizon + housing purchase in 5-10 years; 2-3 year horizon + cash need at the same or later timing; future spending that is not large relative to total assets; existence of gifting, retirement, study-abroad, housing purchase, bonus, stock option, irregular income, or large financial assets.",
+    "Conflicts should be created only when the customer's goal, investment horizon, risk preference, liquidity plan, asset scale, or likely behavior are practically difficult to satisfy together. If unclear, prefer followUps instead of conflicts.",
+    `If no actual conflict rule is detected, conflicts must contain ONLY this exact sentence and no extra explanation: "${noConflictLine}"`,
+    "For conflicts, do not select only one representative case. If multiple conflicts have different causes, rules, or counseling points, output all of them. Merge only identical or very similar conflicts. For example, high expected return vs stable return preference and low-risk preference vs leverage/crypto/high-risk asset preference are different conflicts and must both remain.",
+    "Good conflict examples: principal preservation first + expected return 15% or higher; very-low-risk preference + leverage/crypto/high-risk asset desire; 10+ year horizon + using most assets within 1-2 years; retirement funding purpose + aggressive short-term trading plan; liquidity needs taking most investable assets; low loss tolerance + high-risk product preference.",
+    "followUps: each item must contain one evidence-rich text and exactly ONE memoItems label derived ONLY from that same text. Do not create memoItems for anything not mentioned in followUps.text.",
+    "followUps are for additional questions, not contradictions. Prefer followUps for housing timing, child education/study-abroad funding, retirement preparation, gifting details, emergency-reserve management, bonus/stock-option usage, financial-asset allocation, company trading restrictions, tax planning, and spouse/family decision participation.",
+    "PB memoItems are not for re-confirming information already entered. Generate memoItems only for detailed information not knowable from the current input but necessary in a real PB meeting. Do not create memoItems such as total assets, investment horizon, expected return, monthly cashflow, or emergency-reserve amount when those values are already provided.",
     "communicationGuides: suggest how the PB should explain. Do not create PB memo items here.",
     "Never generate memoItems without a corresponding followUps.text.",
     "Do not generate customer-inappropriate memoItems. For a 60+ retired client, do not ask marriage plan or housing purchase unless explicitly mentioned. For an education-funding client, do not ask housing purchase unless explicitly mentioned.",
     "Merge semantically duplicate memoItems. Examples: '비정기 소득 지급 시점/확정 가능성/사용 계획' should become '비정기 소득 지급 시점 및 사용 계획'. '자금 사용 시점/우선순위/목돈 사용 시점' should become '자금 사용 시점 및 우선순위'.",
-    "Limit memoItems to 4-6 only and keep only items directly tied to the customer's actual inputs.",
+    "For each followUps item, choose only the single most important PB memo label. The server will display PB memo as a 1:1 counterpart to followUps.",
+    "Integrate similar detected rules into one PB-ready insight. Do not list raw rules. Preserve information diversity across Tax, Risk, Time Horizon, Liquidity, Legal, and Unique instead of repeating one theme.",
+    "Use semantic equivalence when applying rules. Job titles, ticker names, ETF names, product names, or informal descriptions may differ from the Word-file wording; if the meaning is the same, apply the same rule.",
+    "Use Unique only when it adds distinct customer traits, counseling strategy, or behavior patterns. Do not repeat asset preference alone when Risk already explains aggression; keep Unique insights when they affect counseling style, such as spouse influence, limited monitoring time, market-news sensitivity, many questions, portfolio dissatisfaction, or tax-sensitive dividend preferences.",
+    "Additional follow-up rules: if the input clearly shows aggressive investing caused past large losses, create a followUps item about checking the current investment strategy and risk-management method. If existing portfolio returns are low or the client is dissatisfied with the current portfolio, create a followUps item about identifying the cause of weak returns and explaining improvement direction. If asset monitoring time is limited, create a followUps item about after-service needs and management method.",
     "In explanation, do not list raw keywords such as '시장 뉴스, 민감, 망가진'. Interpret qualitative notes from Unique 기타 and Smart Input into a counseling strategy.",
     "Unique 기타 is a core input for explanation. Review every qualitative item and translate it into how the PB should explain, pace, frame risk, handle family influence, or reduce impulsive decisions.",
     "If Unique 기타 mentions market-news sensitivity, fast decision-making, past portfolio damage, leverage, dissatisfaction, spouse influence, many questions, or urgency about wealth-building, explain the behavioral implication and the recommended PB communication style. Do not simply copy the words.",
@@ -599,25 +868,46 @@ function fallbackGuide(payload: any): AdvisoryGuide {
   const conflicts: GuideLine[] = [];
   const followUps: GuideLine[] = [];
   const explanation: GuideLine[] = [];
+  const totalAssets = parseKoreanAmount(financial.totalAssets);
+  const requiredRatio = ratio(typeof liquidity.requiredAmount === "number" ? liquidity.requiredAmount : null, totalAssets);
+  const maxExpectedReturn = extractMaxPercent(rrttllu.expectedReturn);
+  const conservativeObjective = rrttllu.returnObjective === "원금 보존 투자" || text(rrttllu.returnObjective).includes("안정적");
+  const highRiskAssetCue = /레버리지|암호화폐|가상자산|급등주|고위험|파생|선물|옵션/.test(`${rrttllu.preferredAssets}\n${rrttllu.existingAssetPlan}\n${qualitative}`);
+  const lowRiskCue = /초저위험|저위험|원금\s*보존|손실.*원하지|손실.*감내.*못|전액\s*환매/.test(`${risk.level}\n${rrttllu.returnObjective}\n${rrttllu.riskAttitude}\n${rrttllu.lossResponse}`);
 
-  if (rrttllu.expectedReturn || rrttllu.returnObjective || risk.level) {
+  if (rrttllu.returnObjective === "원금 보존 투자" && maxExpectedReturn !== null && maxExpectedReturn >= 15) {
     conflicts.push({
-      text: `고객은 ${rrttllu.returnObjective || "투자 목적 미입력"} 성향과 기대수익률 ${rrttllu.expectedReturn || "미입력"}을 제시했고, 현재 위험등급은 ${risk.level || "미산출"}입니다. 기대수익과 실제 손실 감내 수준이 같은 방향인지 상담 중 확인하는 것이 좋습니다.`,
-      highlights: [`기대수익률 ${rrttllu.expectedReturn || "미입력"}`, `위험등급은 ${risk.level || "미산출"}`],
+      text: `고객은 '${rrttllu.returnObjective}'를 선택했지만 기대수익률은 '${rrttllu.expectedReturn}'로 입력했습니다. 원금 보존 최우선 성향과 높은 기대수익률이 동시에 충족되기 어려울 수 있어 실제 손실 감내 수준을 확인하는 것이 좋습니다.`,
+      highlights: [rrttllu.returnObjective, rrttllu.expectedReturn],
     });
-  } else {
-    conflicts.push({ text: fallbackLine });
+  } else if (conservativeObjective && maxExpectedReturn !== null && maxExpectedReturn >= 10) {
+    conflicts.push({
+      text: `고객은 '${rrttllu.returnObjective}'를 선택했지만 기대수익률은 '${rrttllu.expectedReturn}'로 입력했습니다. 안정 성향과 기대수익률의 현실성이 일치하는지 확인하는 것이 좋습니다.`,
+      highlights: [rrttllu.returnObjective, rrttllu.expectedReturn],
+    });
   }
-  if (rrttllu.lumpSumPlan || rrttllu.regularCashflowNeed) {
+  if (lowRiskCue && highRiskAssetCue) {
     conflicts.push({
-      text: `고객은 투자기간을 ${rrttllu.timeHorizon || "미입력"}으로 두고 있으나, ${rrttllu.lumpSumPlan || rrttllu.regularCashflowNeed}도 함께 입력했습니다. 투자 기간과 실제 자금 사용 시점이 충돌할 가능성이 있으므로 투자 가능 자금 범위를 확인하는 것이 좋습니다.`,
-      highlights: [`투자기간을 ${rrttllu.timeHorizon || "미입력"}`, rrttllu.lumpSumPlan || rrttllu.regularCashflowNeed],
+      text: `고객 응답에는 원금 보전 또는 낮은 위험 선호 신호가 있으나, Smart Input 또는 Unique에는 레버리지·가상자산·고위험 자산 관련 단서가 함께 나타납니다. 실제 손실 감내 수준과 선호 자산의 위험도가 양립 가능한지 확인하는 것이 좋습니다.`,
+      highlights: ["낮은 위험 선호", "고위험 자산"],
     });
+  }
+  const useYear = earliestUseYear(`${rrttllu.lumpSumPlan}\n${rrttllu.regularCashflowNeed}`);
+  const horizonYears = horizonMinYears(rrttllu.timeHorizon);
+  if (horizonYears !== null && horizonYears >= 5 && useYear !== null && useYear <= 2 && requiredRatio !== null && requiredRatio >= 0.7) {
+    conflicts.push({
+      text: `고객은 투자기간을 '${rrttllu.timeHorizon}'으로 선택했지만, ${useYear}년 내 사용 예정 자금이 총자산 대비 큰 비중으로 입력되어 있습니다. 장기 투자 계획과 단기 자금 사용 계획이 현실적으로 양립하기 어려울 수 있어 투자 가능 자금 범위를 확인하는 것이 좋습니다.`,
+      highlights: [rrttllu.timeHorizon, `${useYear}년 내 사용 예정 자금`],
+    });
+  }
+  if (!conflicts.length) {
+    conflicts.push({ text: noConflictLine });
   }
   if (rrttllu.emergencyReservePlan) {
-    conflicts.push({
-      text: `비상예비자금 계획으로 '${rrttllu.emergencyReservePlan}'을 입력했습니다. 위험자산 비중을 높일 경우에도 해당 자금이 분리 관리되는지 확인하는 것이 좋습니다.`,
+    followUps.push({
+      text: `비상예비자금 계획으로 '${rrttllu.emergencyReservePlan}'을 입력했습니다. 이 자금은 상충 정보라기보다 위험자산 투자와 분리 관리되어야 하는 유동성 확인 항목으로 보는 것이 적절합니다.`,
       highlights: ["비상예비자금", rrttllu.emergencyReservePlan],
+      memoItems: ["비상예비자금 분리 관리 여부"],
     });
   }
   followUps.push({
@@ -630,6 +920,27 @@ function fallbackGuide(payload: any): AdvisoryGuide {
       text: `향후 예상 비정기 소득으로 '${financial.irregularIncome}'이 입력되어 있습니다. 지급 시점과 확정 가능성에 따라 투자 시작 시점과 분할 투자 계획이 달라질 수 있습니다.`,
       highlights: ["비정기 소득", financial.irregularIncome],
       memoItems: ["비정기 소득 지급 시점 및 사용 계획"],
+    });
+  }
+  if (/공격적.*손실|큰\s*손실|손실\s*경험|급등주|과도한\s*레버리지|레버리지.*손실|포트폴리오.*훼손|수익률.*망가/.test(qualitative)) {
+    followUps.push({
+      text: `Smart Input 또는 Unique 기타에는 공격적 투자나 레버리지 활용으로 과거 손실을 경험한 맥락이 나타납니다. 현재 투자 전략이 과거 손실 원인을 어떻게 보완하는지, 위험관리 기준이 실제로 마련되어 있는지 확인하는 것이 좋습니다.`,
+      highlights: ["과거 손실 경험", "위험관리 기준"],
+      memoItems: ["현재 투자 전략 및 위험관리 방식"],
+    });
+  }
+  if (/기존\s*포트폴리오.*수익률.*낮|포트폴리오.*수익률.*낮|벤치마크.*낮|수익률.*부진|수익률.*불만|포트폴리오.*불만/.test(qualitative)) {
+    followUps.push({
+      text: `고객은 기존 포트폴리오 수익률이 낮거나 현재 포트폴리오에 대한 불만을 언급했습니다. 수익률 저조 원인이 자산배분, 시장 대응, 상품 선택, 관리 빈도 중 어디에 있는지 확인해야 개선 방향을 설명하기 쉽습니다.`,
+      highlights: ["포트폴리오 수익률", "개선 방향"],
+      memoItems: ["수익률 저조 원인 및 개선 방향"],
+    });
+  }
+  if (/모니터링|관리\s*시간\s*부족|관리할\s*시간|본업이\s*바빠|자주\s*못\s*봄|주도주\s*편입.*못/.test(qualitative)) {
+    followUps.push({
+      text: `고객은 자산 모니터링 시간이 부족하거나 본업으로 인해 포트폴리오 관리가 제한되는 맥락을 보입니다. 상담 후 어떤 방식의 사후 관리와 점검 주기가 필요한지 확인하는 것이 좋습니다.`,
+      highlights: ["자산 모니터링 시간 부족", "사후 관리"],
+      memoItems: ["사후 관리 니즈 및 관리 방식"],
     });
   }
   explanation.push({
@@ -705,7 +1016,7 @@ function fallbackGuide(payload: any): AdvisoryGuide {
     conflicts: { lines: conflicts.slice(0, 5) },
     followUps: {
       lines: followUps.slice(0, 5),
-      checkpoints: memoItemsToCheckpoints(followUps.slice(0, 5)),
+      checkpoints: memoItemsToCheckpoints(followUps.slice(0, 5), payload),
     },
     explanation: { lines: explanation.slice(0, 5) },
   };
@@ -714,10 +1025,25 @@ function fallbackGuide(payload: any): AdvisoryGuide {
 async function callGemini(payload: unknown) {
   const ruleGuide = buildRuleInsights(payload);
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { source: "mock", data: mergeGuides(ruleGuide, fallbackGuide(payload)) };
+  if (!apiKey) return { source: "mock", data: mergeGuides(ruleGuide, fallbackGuide(payload), payload) };
 
   try {
     const prompt = buildPrompt(payload, ruleGuide);
+    const requestPayload = payload as {
+      customerId?: string;
+      smartInputNote?: string;
+      uniqueOther?: string;
+      smartInputContext?: { smartExtractedUniqueOther?: string };
+    };
+    console.info("[Gemini Call] advisory-guide", {
+      customerId: requestPayload.customerId,
+      smartInputLength: typeof requestPayload.smartInputNote === "string" ? requestPayload.smartInputNote.length : 0,
+      uniqueOtherLength: typeof requestPayload.uniqueOther === "string" ? requestPayload.uniqueOther.length : 0,
+      smartExtractedUniqueOtherLength: typeof requestPayload.smartInputContext?.smartExtractedUniqueOther === "string"
+        ? requestPayload.smartInputContext.smartExtractedUniqueOther.length
+        : 0,
+      timestamp: new Date().toISOString(),
+    });
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -734,10 +1060,10 @@ async function callGemini(payload: unknown) {
     const result = await response.json();
     const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (typeof text !== "string") throw new Error("Gemini response did not include JSON text.");
-    return { source: "gemini", data: mergeGuides(ruleGuide, normalizeGuide(JSON.parse(text))) };
+    return { source: "gemini", data: mergeGuides(ruleGuide, normalizeGuide(JSON.parse(text)), payload) };
   } catch (error) {
     console.error("AI advisory guide generation failed. Falling back to mock.", { error });
-    return { source: "mock", fallback: true, data: mergeGuides(ruleGuide, fallbackGuide(payload)) };
+    return { source: "mock", fallback: true, data: mergeGuides(ruleGuide, fallbackGuide(payload), payload) };
   }
 }
 
