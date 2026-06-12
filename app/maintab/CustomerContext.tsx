@@ -14,6 +14,7 @@ export type FinancialInfo = {
   annualFixedIncome: string;
   irregularIncome: string;
   irregularIncomeNone: boolean;
+  investableAssets: string;
   monthlyFixedExpense: string;
 };
 
@@ -68,6 +69,7 @@ export type StructuredJsonPayload = {
     asset_summary: string | null;
     annual_fixed_income: string | null;
     irregular_income: string | null;
+    investable_assets: string | null;
     monthly_fixed_expense: string | null;
   };
   rrttllu: {
@@ -120,13 +122,6 @@ export type StructuredJsonPayload = {
 
 export type ChangeEntry = { label: string; before: string; after: string; changedAt: number };
 
-export type LiquiditySummaryInfo = {
-  requiredAmount: number | null;
-  investableAmount: number | null;
-  requiredDisplay: string;
-  investableDisplay: string;
-};
-
 export type CustomerUpdatedMap = Record<CustomerId, number>;
 
 export type AppState = { financial: FinancialInfo; rrttllu: RrttlluInfo; smartInputNote: string; uniqueOtherManual: string; smartExtractedUniqueOther: string; aiGuidePbNotes: Record<string, string> };
@@ -170,10 +165,11 @@ export type StorageResult = { ok: boolean; message: string };
 
 // ── Constants ──────────────────────────────────────────────────────────────
 export const workspaceTabs = [
-  { id: "profile"   as const, label: "고객 성향 분석",       description: "재무 정보와 RRTTLLU 입력" },
-  { id: "existing"  as const, label: "기존 포트폴리오 분석", description: "보유 현황, 위험 및 분산 분석" },
-  { id: "create"    as const, label: "신규 포트폴리오 생성", description: "추천 조건과 선호 반영" },
-  { id: "compare"   as const, label: "포트폴리오 비교",       description: "기존안과 신규안 비교" },
+  { id: "profile"   as const, label: "고객 성향 분석",       description: "기본 정보와 RRTTLLU 입력" },
+  { id: "existing"  as const, label: "기존 포트폴리오 분석", description: "보유 자산, 위험 및 건강 분석" },
+  { id: "create"    as const, label: "신규 포트폴리오 분석", description: "RRTTLLU 기반 신규 배분" },
+  { id: "recommend" as const, label: "상품 추천",             description: "버킷별 상품 추천" },
+  { id: "compare"   as const, label: "포트폴리오 비교",       description: "기존과 신규 비교" },
 ];
 
 // ── Portfolio Analysis Types ───────────────────────────────────────────────
@@ -185,7 +181,7 @@ export type PortfolioAsset = {
   buy_price: number | null;
   amount: number;
   amount_type: "quantity" | "value";
-  is_hedged: boolean;
+  is_hedged: boolean;        // 항상 false — 환노출 고정
   needs_review: boolean;
   review_reason?: string | null;
   current_price?: number;
@@ -194,8 +190,12 @@ export type PortfolioAsset = {
   gain?: number;
   price_source?: string;
   _rawAmount?: string;
-  ticker?: string;       // Yahoo Finance 티커 (Gemini 자동완성 또는 직접 입력)
-  productType?: string;  // 상품 유형 (ETF, 개별주식, 채권 등)
+  ticker?: string;           // Yahoo Finance 티커 (Gemini 자동완성 또는 직접 입력)
+  productType?: string;      // 통합 상품유형 (국내주식|해외주식|국내채권|해외채권|국내ETF|해외ETF|예적금/현금)
+  bond_yield?: number | null;    // 채권 수익률(%) — 채권 유형일 때만 사용
+  bond_maturity?: number | null; // 채권 만기(년) — 채권 유형일 때만 사용
+  // 데이터 소유권 낙인 — 로드 시 해당 고객 ID로 강제 찍힘, null이면 미확정 상태
+  owner_customer_id?: string | null;
 };
 
 export type PortfolioAnalysisResult = {
@@ -209,6 +209,24 @@ export type PortfolioAnalysisResult = {
   healthResult?: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tlhResult?: any;
+};
+
+// 빈 자산 행 템플릿 — MainTabShell과 ExistingPortfolioTab에서 공용으로 사용
+export const EMPTY_PORTFOLIO_ASSET: PortfolioAsset = {
+  name: "",
+  asset_class: "해외주식",
+  theme: "기타",
+  country: "미국",
+  buy_price: null,
+  amount: 0,
+  amount_type: "quantity",
+  is_hedged: false,
+  needs_review: false,
+  ticker: "",
+  productType: "해외주식",
+  bond_yield: null,
+  bond_maturity: null,
+  owner_customer_id: null,  // 소유권 미확정 — addPortfolioRow 시 selectedCustomer로 덮어씌워짐
 };
 
 export const defaultCustomerProfiles: CustomerProfile[] = [
@@ -267,7 +285,7 @@ export const riskInterpretations: Record<RiskLevel, string> = {
 // ── Initial State ──────────────────────────────────────────────────────────
 const emptyFinancial: FinancialInfo = {
   totalAssets: "", financialAssets: "", realEstate: "", debt: "",
-  annualFixedIncome: "", irregularIncome: "", irregularIncomeNone: false, monthlyFixedExpense: "",
+  annualFixedIncome: "", irregularIncome: "", irregularIncomeNone: false, investableAssets: "", monthlyFixedExpense: "",
 };
 
 const emptyRrttllu: RrttlluInfo = {
@@ -638,19 +656,6 @@ export function parseKrwAmount(value: string | null): number | null {
   return parseSingleKrwAmount(normalized);
 }
 
-export function calculateLiquiditySummary(formData: AppState): LiquiditySummaryInfo {
-  const amounts = [
-    parseKrwAmount(nullableText(formData.rrttllu.regularCashflowNeed)),
-    parseKrwAmount(nullableText(formData.rrttllu.lumpSumPlan)),
-    parseKrwAmount(nullableText(formData.rrttllu.emergencyReservePlan)),
-  ].filter((x): x is number => x !== null);
-  const requiredAmount = amounts.length ? amounts.reduce((s, x) => s + x, 0) : null;
-  const totalAssets = parseKrwAmount(nullableText(formData.financial.totalAssets));
-  const investableAmount = requiredAmount !== null && totalAssets !== null ? Math.max(totalAssets - requiredAmount, 0) : null;
-  const fmt = (n: number | null) => n === null ? "계산 대기" : `${n.toLocaleString("ko-KR")}원`;
-  return { requiredAmount, investableAmount, requiredDisplay: fmt(requiredAmount), investableDisplay: fmt(investableAmount) };
-}
-
 export function buildStructuredJsonPayload(formData: AppState, riskResult: RiskResult, customerProfile?: CustomerProfile): StructuredJsonPayload {
   const { financial, rrttllu } = formData;
   const warnings: string[] = [];
@@ -662,6 +667,7 @@ export function buildStructuredJsonPayload(formData: AppState, riskResult: RiskR
   const assetSummary = assetParts.length ? assetParts.join(", ") : null;
   const annualFixedIncome = nullableText(financial.annualFixedIncome);
   const irregularIncome = financial.irregularIncomeNone ? "없음" : nullableText(financial.irregularIncome);
+  const investableAssets = nullableText(financial.investableAssets);
   const monthlyFixedExpense = nullableText(financial.monthlyFixedExpense);
   const expectedInterestIncome = nullableText(rrttllu.expectedInterestIncome);
   const expectedDividendIncome = nullableText(rrttllu.expectedDividendIncome);
@@ -680,7 +686,7 @@ export function buildStructuredJsonPayload(formData: AppState, riskResult: RiskR
   };
 
   if (hasMissingProfile) warnings.push("기본 신상 정보가 부족합니다.");
-  if (!assetSummary || !annualFixedIncome || !monthlyFixedExpense || !irregularIncome) warnings.push("기본 재무 정보가 부족합니다.");
+  if (!assetSummary || !annualFixedIncome || !monthlyFixedExpense || !irregularIncome || !investableAssets) warnings.push("기본 재무 정보가 부족합니다.");
   if (!nullableText(rrttllu.returnObjective) || (!nullableText(rrttllu.expectedReturn) && !rrttllu.expectedReturnUnknown)) warnings.push("목표 수익률 (Return) 정보가 부족합니다.");
   if (Object.values(riskAnswers).some((v) => v === null)) warnings.push("위험 허용도 (Risk) 정보가 부족합니다.");
   if (!nullableText(rrttllu.timeHorizon)) warnings.push("투자 기간 (Time Horizon) 정보가 부족합니다.");
@@ -691,7 +697,7 @@ export function buildStructuredJsonPayload(formData: AppState, riskResult: RiskR
   if (!nullableText(rrttllu.preferredAssets) || !nullableText(rrttllu.avoidedAssets) || !nullableText(rrttllu.holdingOrDisposalPlan)) warnings.push("고객 고유 상황 (Unique Circumstances) 정보가 부족합니다.");
 
   return {
-    basic_financial_info: { asset_summary: assetSummary, annual_fixed_income: annualFixedIncome, irregular_income: irregularIncome, monthly_fixed_expense: monthlyFixedExpense },
+    basic_financial_info: { asset_summary: assetSummary, annual_fixed_income: annualFixedIncome, irregular_income: irregularIncome, investable_assets: investableAssets, monthly_fixed_expense: monthlyFixedExpense },
     rrttllu: {
       return: { objective: nullableText(rrttllu.returnObjective), expected_return: rrttllu.expectedReturnUnknown ? "구체적인 수치는 모름" : nullableText(rrttllu.expectedReturn) },
       risk: { score: riskResult.score, level: riskResult.level, answers: riskAnswers, interpretation: riskResult.interpretation },
@@ -737,6 +743,68 @@ export function expectedReturnDisplay(rrttllu: RrttlluInfo) {
   return rrttllu.expectedReturn || "입력 대기";
 }
 
+// ── Portfolio & Analysis Supabase Helpers ─────────────────────────────────
+
+export async function loadPortfolioAssets(customerId: CustomerId): Promise<PortfolioAsset[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from("portfolio_assets")
+      .select("assets")
+      .eq("customer_id", customerId)
+      .maybeSingle();
+    if (error || !data) return [];
+    const raw: PortfolioAsset[] = Array.isArray((data as { assets?: unknown }).assets)
+      ? ((data as { assets: PortfolioAsset[] }).assets)
+      : [];
+    // 로드 완료 즉시 전 행에 소유권 낙인 — 이 배열이 메모리에 올라가는 순간부터
+    // owner_customer_id가 customerId와 일치해야만 저장이 허용된다
+    return raw.map(a => ({ ...a, owner_customer_id: customerId }));
+  } catch {
+    return [];
+  }
+}
+
+export async function savePortfolioAssets(customerId: CustomerId, assets: PortfolioAsset[]): Promise<void> {
+  if (!supabase) return;
+  // ── 데이터 소유권 낙인 검증 (절대 가드) ────────────────────────────────────
+  // 저장 배열 내 모든 행의 owner_customer_id가 customerId와 완전 일치해야만 통과.
+  // 단 한 행이라도 소유권이 불일치(다른 고객 ID, null, undefined)하면 즉시 차단.
+  // 이 가드는 비동기 타이머·유령 Effect·레이스 컨디션 어떤 경로로 호출되어도
+  // 데이터 객체 자체의 낙인이 틀리면 DB를 절대 터치하지 못한다.
+  const isOwnershipValid = assets.length > 0 &&
+    assets.every(a => a.owner_customer_id === customerId);
+  if (!isOwnershipValid) return;
+  // ── 콘텐츠 가드: 모든 행이 빈 껍데기이면 저장 차단 ──────────────────────
+  const hasContent = assets.some(a => (a.name ?? "").trim() || (a.ticker ?? "").trim());
+  if (!hasContent) return;
+  await supabase
+    .from("portfolio_assets")
+    .upsert({ customer_id: customerId, assets, updated_at: new Date().toISOString() }, { onConflict: "customer_id" });
+}
+
+export async function loadAnalysisResult(customerId: CustomerId): Promise<unknown | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from("analysis_results")
+      .select("result")
+      .eq("customer_id", customerId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return (data as { result?: unknown }).result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveAnalysisResult(customerId: CustomerId, result: unknown): Promise<void> {
+  if (!supabase) return;
+  await supabase
+    .from("analysis_results")
+    .upsert({ customer_id: customerId, result, updated_at: new Date().toISOString() }, { onConflict: "customer_id" });
+}
+
 // ── Context ────────────────────────────────────────────────────────────────
 export type CustomerContextValue = {
   formData: AppState;
@@ -748,7 +816,6 @@ export type CustomerContextValue = {
   rrttlluCompletion: number;
   internalJsonPayload: StructuredJsonPayload;
   warnings: string[];
-  liquiditySummary: LiquiditySummaryInfo;
   analysisRequested: boolean;
   confirmedRiskResult: RiskResult | null;
   changeHistory: ChangeEntry[];
@@ -769,6 +836,15 @@ export type CustomerContextValue = {
   applySmartExtraction: (payload: SmartExtractionPayload) => void;
   updateCustomerProfile: (key: keyof Omit<CustomerProfile, "id">, value: string) => void;
   setChangeHistoryExpanded: React.Dispatch<React.SetStateAction<boolean>>;
+  // ── 포트폴리오 전역 상태 (탭 이동 시에도 메모리에서 유지됨) ──────────────
+  portfolioAssets: PortfolioAsset[];
+  isPortfolioLoaded: boolean;
+  analysisResult: PortfolioAnalysisResult | null;
+  addPortfolioRow: () => void;
+  removePortfolioRow: (index: number) => void;
+  updatePortfolioRow: (index: number, patch: Partial<PortfolioAsset>) => void;
+  setAnalysisResult: (result: PortfolioAnalysisResult | null) => void;
+  setPortfolioDirty: (dirty: boolean) => void;
 };
 
 export const CustomerContext = createContext<CustomerContextValue | null>(null);

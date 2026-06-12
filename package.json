@@ -14,7 +14,8 @@
     "next": "latest",
     "react": "latest",
     "react-chartjs-2": "^5.3.1",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@types/node": "latest",
