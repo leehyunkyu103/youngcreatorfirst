@@ -263,11 +263,3 @@ export function Metric({ label, value, strong = false }: { label: string; value:
   );
 }
 
-export function LiquiditySummary({ summary }: { summary: { requiredDisplay: string; investableDisplay: string } }) {
-  return (
-    <div className="grid gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-      <p className="text-sm font-bold leading-6 text-blue-900">필요 자금(정기적 현금흐름, 목돈 사용 자금, 비상예비자금): {summary.requiredDisplay}</p>
-      <p className="text-sm font-bold leading-6 text-blue-900">투자 가능 자산(당장 사용 계획이 없는 자산): {summary.investableDisplay}</p>
-    </div>
-  );
-}

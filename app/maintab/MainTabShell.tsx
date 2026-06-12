@@ -8,7 +8,7 @@ import {
   type AppState, type ChangeEntry, type CustomerId, type CustomerProfile,
   type CustomerUpdatedMap, type FinancialInfo, type RiskResult, type RrttlluInfo,
   type SmartExtractionPayload, type StoredCustomerState,
-  buildStructuredJsonPayload, calculateLiquiditySummary, calculateRiskResult,
+  buildStructuredJsonPayload, calculateRiskResult,
   completion, customerRowsToStoredState, customerRowsToUpdatedMap, customerStorage,
   customerTabLabel, defaultCustomerProfiles, createInitialCustomerData, createInitialState,
   createNewCustomerProfile, expectedReturnDisplay, fieldGroups, formatChangeDate,
@@ -101,6 +101,7 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
     formData.financial.totalAssets, formData.financial.financialAssets, formData.financial.realEstate,
     formData.financial.debt, formData.financial.annualFixedIncome,
     formData.financial.irregularIncomeNone ? "없음" : formData.financial.irregularIncome,
+    formData.financial.investableAssets,
     formData.financial.monthlyFixedExpense,
   ]), [formData.financial]);
 
@@ -111,9 +112,7 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
 
   const internalJsonPayload = useMemo(() => buildStructuredJsonPayload(formData, confirmedRiskResult ?? riskResult, selectedCustomerProfile), [confirmedRiskResult, formData, riskResult, selectedCustomerProfile]);
   const warnings = internalJsonPayload.rrttllu.warnings;
-  const liquiditySummary = useMemo(() => calculateLiquiditySummary(formData), [formData]);
-
-  const customerDataJsonPayload = useMemo(() => ({ appState: formData, analysis: { riskResult, internalJsonPayload, liquiditySummary, financialCompletion, rrttlluCompletion } }), [financialCompletion, formData, internalJsonPayload, liquiditySummary, riskResult, rrttlluCompletion]);
+  const customerDataJsonPayload = useMemo(() => ({ appState: formData, analysis: { riskResult, internalJsonPayload, financialCompletion, rrttlluCompletion } }), [financialCompletion, formData, internalJsonPayload, riskResult, rrttlluCompletion]);
 
   useEffect(() => {
     if (!storageReady || isSeeding || !persistedCustomerIds.includes(selectedCustomer)) return;
@@ -288,7 +287,7 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
       const financialPatch = payload.financial ?? {};
       const rrttlluPatch = payload.rrttllu ?? {};
       const financial = mergeExtractedText(current.financial, financialPatch, [
-        "totalAssets", "financialAssets", "realEstate", "debt", "annualFixedIncome", "irregularIncome", "monthlyFixedExpense",
+        "totalAssets", "financialAssets", "realEstate", "debt", "annualFixedIncome", "irregularIncome", "investableAssets", "monthlyFixedExpense",
       ]);
       if (financialPatch.irregularIncomeNone === true) {
         financial.irregularIncomeNone = true;
@@ -368,7 +367,7 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
   const contextValue = {
     formData, selectedCustomerProfile, customerProfiles, selectedCustomer,
     riskResult, financialCompletion, rrttlluCompletion, internalJsonPayload, warnings,
-    liquiditySummary, analysisRequested, confirmedRiskResult, changeHistory, changeHistoryExpanded,
+    analysisRequested, confirmedRiskResult, changeHistory, changeHistoryExpanded,
     setFinancial, setRrttllu, setIrregularIncome, toggleNoIrregularIncome, setExpectedReturn,
     toggleExpectedReturnUnknown, toggleInvestmentExperience, toggleLegalConstraint, setSmartInputNote, setAiGuidePbNote,
     analyzeRrttllu, resetSelectedCustomer, resetSelectedCustomerInputs, applySmartExtraction,
