@@ -419,16 +419,47 @@ export async function GET(request) {
   const rawDividends = yahooJson.chart?.result?.[0]?.events?.dividends ?? {};
   const oneYearAgo = Math.floor(Date.now() / 1000) - 365 * 24 * 3600;
 
-  const trailingAnnualDividendRate = Object.values(rawDividends).reduce((sum, entry) => {
-    const ts   = typeof entry.date   === "number" ? entry.date   : 0;
-    const amt  = typeof entry.amount === "number" ? entry.amount : 0;
+  const eventsTrailingRate = Object.values(rawDividends).reduce((sum, entry) => {
+    const ts  = typeof entry.date   === "number" ? entry.date   : 0;
+    const amt = typeof entry.amount === "number" ? entry.amount : 0;
     return ts >= oneYearAgo ? sum + amt : sum;
   }, 0);
 
-  const dividendYield =
-    trailingAnnualDividendRate > 0 && regularMarketPrice > 0
-      ? trailingAnnualDividendRate / regularMarketPrice
+  const eventsDividendYield =
+    eventsTrailingRate > 0 && regularMarketPrice > 0
+      ? eventsTrailingRate / regularMarketPrice
       : 0;
+
+  // ── 5단계: quoteSummary API로 더 정확한 배당 데이터 조회 (3개 URL 순차 시도) ──
+  const quoteSummaryUrls = [
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=summaryDetail`,
+    `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=summaryDetail`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?modules=summaryDetail`,
+  ];
+
+  let summaryDividendYield = 0;
+  let summaryTrailingRate = 0;
+
+  for (const url of quoteSummaryUrls) {
+    try {
+      const summaryRes = await fetchWithTimeout(url, { headers: BROWSER_HEADERS }, 5_000);
+      if (!summaryRes.ok) continue;
+      const summaryJson = await summaryRes.json();
+      const detail = summaryJson?.quoteSummary?.result?.[0]?.summaryDetail;
+      if (!detail) continue;
+      const dy   = detail.dividendYield?.raw;
+      const tadr = detail.trailingAnnualDividendRate?.raw;
+      if (typeof dy   === 'number') summaryDividendYield = dy;
+      if (typeof tadr === 'number') summaryTrailingRate  = tadr;
+      break;
+    } catch {
+      // 실패 시 다음 URL 시도
+    }
+  }
+
+  // quoteSummary 값 우선, 없으면 events.dividends 폴백
+  const dividendYield          = summaryDividendYield > 0 ? summaryDividendYield : eventsDividendYield;
+  const trailingAnnualDividendRate = summaryTrailingRate  > 0 ? summaryTrailingRate  : eventsTrailingRate;
 
   return Response.json({ ticker, ...assetMeta, dividendYield, trailingAnnualDividendRate, ...yahooJson });
 }

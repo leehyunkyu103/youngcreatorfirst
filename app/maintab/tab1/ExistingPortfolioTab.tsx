@@ -7,7 +7,6 @@ import type { PortfolioAsset } from "../CustomerContext";
 import {
   FinancialIncomeGauge,
   calcFinancialIncomeSummary,
-  extractDividendFromYahoo,
   FINANCIAL_INCOME_STORAGE_KEY,
   type FinancialIncomeSummary,
   type AssetForIncomeCalc,
@@ -173,24 +172,42 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
           window.dispatchEvent(new CustomEvent("portfolio-result-updated"));
         } catch {}
 
-        // enrichedAssets에서 보완된 배당률·가격을 portfolioAssets에 병합 → 게이지 반영
-        setPortfolioAssets((prev) =>
-          prev.map((a, i) => {
-            const enriched = result.enrichedAssets[i];
-            if (!enriched) return a;
-            return {
-              ...a,
-              current_price: enriched.current_price ?? a.current_price,
-              current_value: enriched.current_value ?? a.current_value,
-              ...(a.dividendYield == null && enriched.dividendYield != null
-                ? { dividendYield: enriched.dividendYield }
-                : {}),
-              ...(a.trailingAnnualDividendRate == null && enriched.trailingAnnualDividendRate != null
-                ? { trailingAnnualDividendRate: enriched.trailingAnnualDividendRate }
-                : {}),
-            };
-          })
-        );
+        // enrichedAssets에서 보완된 배당률·가격을 portfolioAssets에 병합
+        const mergedAssets = assets.map((a, i) => {
+          const enriched = result.enrichedAssets[i];
+          if (!enriched) return a;
+          return {
+            ...a,
+            current_price: enriched.current_price ?? a.current_price,
+            current_value: enriched.current_value ?? a.current_value,
+            // 분석 결과로 배당 데이터 항상 갱신 (최신 Yahoo Finance 값 우선)
+            ...(enriched.dividendYield              != null ? { dividendYield:              enriched.dividendYield              } : {}),
+            ...(enriched.trailingAnnualDividendRate != null ? { trailingAnnualDividendRate: enriched.trailingAnnualDividendRate } : {}),
+          };
+        });
+        setPortfolioAssets(mergedAssets);
+
+        // 분석 완료 즉시 금융소득 요약 계산 → localStorage 저장 → Tab5 게이지 업데이트
+        const assetsForCalc: AssetForIncomeCalc[] = mergedAssets.map((a) => ({
+          name: a.name,
+          ticker: a.ticker ?? "",
+          asset_class: a.asset_class,
+          productType: a.productType,
+          country: a.country,
+          current_price: a.current_price,
+          current_value: a.current_value,
+          amount: a.amount,
+          amount_type: a.amount_type,
+          buy_price: a.buy_price,
+          dividendYield: a.dividendYield,
+          trailingAnnualDividendRate: a.trailingAnnualDividendRate,
+        }));
+        const summary = calcFinancialIncomeSummary(assetsForCalc, tMarginal);
+        setFinancialSummary(summary);
+        try {
+          localStorage.setItem(FINANCIAL_INCOME_STORAGE_KEY, JSON.stringify(summary));
+          window.dispatchEvent(new CustomEvent("financial-income-updated"));
+        } catch {}
 
         setAnalysisComplete(true);
         setPortfolioStatusMsg("");
@@ -246,8 +263,15 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
           return;
         }
 
-        // 배당 데이터 추출
-        const { dividendYield, trailingAnnualDividendRate } = extractDividendFromYahoo(data);
+        // 배당 데이터 추출 (proxy-finance가 root 레벨에 직접 반환)
+        const dividendYield =
+          typeof data.dividendYield === "number" && data.dividendYield > 0
+            ? data.dividendYield
+            : undefined;
+        const trailingAnnualDividendRate =
+          typeof data.trailingAnnualDividendRate === "number" && data.trailingAnnualDividendRate > 0
+            ? data.trailingAnnualDividendRate
+            : undefined;
 
         // 현재가 추출
         const metaResult = data?.chart?.result?.[0]?.meta ?? {};
@@ -270,19 +294,19 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
 
         updateRow(idx, {
           ticker,
-          ...(data.assetClass  ? { asset_class: data.assetClass  as string } : {}),
-          ...(data.productType ? { productType:  data.productType as string } : {}),
-          ...(data.country     ? { country:      data.country     as string } : {}),
           dividendYield,
           trailingAnnualDividendRate,
           current_price: priceKrw,
           current_value,
+          ...(data.assetClass  ? { asset_class: data.assetClass  as string } : {}),
+          ...(data.productType ? { productType:  data.productType as string } : {}),
+          ...(data.country     ? { country:      data.country     as string } : {}),
         });
 
-        const yieldMsg = dividendYield != null && dividendYield > 0
+        const yieldMsg = dividendYield != null
           ? ` · 배당수익률 ${(dividendYield * 100).toFixed(2)}%`
-          : "";
-        showToast(`'${name}' → ${ticker} 자동 인식${yieldMsg}`);
+          : " · 배당수익률 없음";
+        showToast(`'${name}' → ${ticker}${yieldMsg}`);
       } catch (err) {
         console.warn("[SmartInference] API 오류:", err);
         showToast("네트워크 오류가 발생했습니다. 직접 입력해 주세요.");
@@ -402,6 +426,9 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
           </div>
         )}
       </section>
+
+      {/* 금융소득종합과세 및 해외양도세 게이지 */}
+      <FinancialIncomeGauge summary={financialSummary} />
     </div>
   );
 }

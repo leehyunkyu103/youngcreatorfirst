@@ -436,11 +436,8 @@ export function calcFinancialIncomeSummary(
         });
       }
     } else if (productType === "리츠") {
-      // 리츠는 명시적 배당소득
-      let yieldRate = a.dividendYield ?? 0;
-      if (!yieldRate && a.trailingAnnualDividendRate && (a.current_price ?? 0) > 0) {
-        yieldRate = a.trailingAnnualDividendRate / a.current_price!;
-      }
+      // 리츠는 명시적 배당소득 — Yahoo Finance dividendYield 직접 사용
+      const yieldRate = a.dividendYield ?? 0;
 
       const annual = value * yieldRate;
       if (annual > 0) {
@@ -455,11 +452,8 @@ export function calcFinancialIncomeSummary(
         });
       }
     } else {
-      // 기타 배당소득 (기본: 주식/ETF/금 등)
-      let yieldRate = a.dividendYield ?? 0;
-      if (!yieldRate && a.trailingAnnualDividendRate && (a.current_price ?? 0) > 0) {
-        yieldRate = a.trailingAnnualDividendRate / a.current_price!;
-      }
+      // 기타 배당소득 — Yahoo Finance dividendYield 직접 사용, 0이면 제외
+      const yieldRate = a.dividendYield ?? 0;
 
       if (yieldRate > 0) {
         const annual = value * yieldRate;

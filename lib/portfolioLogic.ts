@@ -96,13 +96,9 @@ export const runAnalysis = async (
   // 이 방식은 FOREIGN_CLASSES 열거 없이도 금·암호화폐·해외ETF 등을 자동 처리한다.
   const enrichedAssets = await Promise.all(
     assets.map(async (a) => {
-      if (
-        a.amount_type !== "quantity" ||
-        !a.name ||
-        (a.current_price != null && a.current_price > 0)
-      ) {
-        return a;
-      }
+      if (a.amount_type !== "quantity" || !a.name) return a;
+      // 현재가 AND 배당 모두 있으면 재조회 불필요
+      if (a.current_price != null && a.current_price > 0 && a.dividendYield != null) return a;
       try {
         const TICKER_RE = /^[\w.\-=^]+$/;
         const queryParam =
@@ -151,8 +147,9 @@ export const runAnalysis = async (
             ...a,
             current_price: priceKrw,
             current_value: cvKrw,
-            ...(a.dividendYield == null && dy != null ? { dividendYield: dy } : {}),
-            ...(a.trailingAnnualDividendRate == null && tadr != null ? { trailingAnnualDividendRate: tadr } : {}),
+            // 분석 시 Yahoo Finance 최신 배당 데이터로 항상 갱신
+            ...(dy   != null ? { dividendYield:              dy   } : {}),
+            ...(tadr != null ? { trailingAnnualDividendRate: tadr } : {}),
           };
         }
       } catch {
