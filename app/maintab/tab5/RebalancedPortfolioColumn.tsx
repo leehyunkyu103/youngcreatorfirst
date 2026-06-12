@@ -1,12 +1,11 @@
 "use client";
 
-import { TrendingUp, WalletCards } from "lucide-react";
+import { TrendingUp } from "lucide-react";
 import type { PortfolioAnalysisResult, PortfolioAsset } from "../CustomerContext";
 import {
   DonutChart,
   fmt,
   fmtPct,
-  HoldingPerformanceTable,
   MetricCard,
   PieChartIcon,
   PortfolioIssueBanner,
@@ -30,14 +29,6 @@ export default function RebalancedPortfolioColumn({ data }: { data: PortfolioAna
       {/* 자산군별 비중 분포 도넛 차트 */}
       <ResultCard icon={<PieChartIcon />} title="자산군별 비중 분포" accent="slate">
         <DonutChart assets={enrichedAssets} />
-      </ResultCard>
-
-      {/* 보유 자산 현황 */}
-      <ResultCard icon={<WalletCards size={18} />} title="신규 보유 자산 현황" accent="slate">
-        <HoldingPerformanceTable assets={enrichedAssets} />
-        {!enrichedAssets.filter((a) => a.name).length && (
-          <p className="text-sm text-slate-400">표시할 자산이 없습니다.</p>
-        )}
       </ResultCard>
 
       {/* 핵심 지표 요약 */}
