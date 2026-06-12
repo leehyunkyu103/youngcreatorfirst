@@ -37,6 +37,8 @@ export interface PortfolioAssetInput {
   productType?: string;      // 통합 상품유형 (국내주식|해외주식|국내채권|해외채권|국내ETF|해외ETF|예적금/현금)
   bond_yield?: number | null;    // 채권 수익률(%) — 채권 유형일 때만
   bond_maturity?: number | null; // 채권 만기(년) — 채권 유형일 때만
+  dividendYield?: number;              // Yahoo Finance 연간 배당수익률 (소수)
+  trailingAnnualDividendRate?: number; // Yahoo Finance 주당 연간 배당금
 }
 
 export interface RunAnalysisResult {

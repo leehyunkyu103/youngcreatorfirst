@@ -136,6 +136,7 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
       buy_price: a.buy_price,
       dividendYield: a.dividendYield,
       trailingAnnualDividendRate: a.trailingAnnualDividendRate,
+      interestRate: a.bond_yield != null ? a.bond_yield / 100 : undefined,
     }));
 
     const summary = calcFinancialIncomeSummary(assetsForCalc, tMarginal);
@@ -201,6 +202,7 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
           buy_price: a.buy_price,
           dividendYield: a.dividendYield,
           trailingAnnualDividendRate: a.trailingAnnualDividendRate,
+          interestRate: a.bond_yield != null ? a.bond_yield / 100 : undefined,
         }));
         const summary = calcFinancialIncomeSummary(assetsForCalc, tMarginal);
         setFinancialSummary(summary);
@@ -381,7 +383,7 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
             <table className="w-full text-sm">
               <thead className="border-b border-slate-200 bg-slate-50">
                 <tr>
-                  {["종목명", "티커", "상품유형", "투자국가", "자산군", "수량", "매수단가(원)", ...(hideDividendColumn ? [] : ["배당수익률"]), "헤지", ""].map((h) => (
+                  {["종목명", "티커", "상품유형", "투자국가", "자산군", "수량", "매수단가(원)", ...(hideDividendColumn ? [] : ["배당/이자율(%)"]), "헤지", ""].map((h) => (
                     <th key={h} className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-bold text-slate-500">
                       {h}
                     </th>
@@ -427,8 +429,6 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
         )}
       </section>
 
-      {/* 금융소득종합과세 및 해외양도세 게이지 */}
-      <FinancialIncomeGauge summary={financialSummary} />
     </div>
   );
 }
@@ -556,22 +556,38 @@ function AssetRow({
         />
       </td>
 
-      {/* 배당수익률 — AI 자동입력, 직접 수정 가능 */}
+      {/* 배당/이자율 — 채권이면 이자율(bond_yield), 아니면 배당수익률(dividendYield) */}
       {!hideDividendColumn && (
         <td className="px-3 py-2">
-          <div className="flex items-center gap-1">
-            <input
-              type="number"
-              step="0.01"
-              className="h-9 w-20 rounded border border-slate-200 px-2 text-xs text-navy"
-              value={a.dividendYield != null ? (a.dividendYield * 100).toFixed(2) : ""}
-              placeholder=""
-              onChange={(e) => onUpdate(idx, {
-                dividendYield: e.target.value ? Number(e.target.value) / 100 : undefined,
-              })}
-            />
-            <span className="text-xs text-slate-400">%</span>
-          </div>
+          {a.asset_class === "국내채권" || a.asset_class === "해외채권" ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                step="0.01"
+                className="h-9 w-20 rounded border border-blue-200 bg-blue-50 px-2 text-xs text-navy"
+                value={a.bond_yield ?? ""}
+                placeholder="이자율"
+                onChange={(e) => onUpdate(idx, {
+                  bond_yield: e.target.value ? Number(e.target.value) : null,
+                })}
+              />
+              <span className="text-xs text-blue-400">%</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                step="0.01"
+                className="h-9 w-20 rounded border border-slate-200 px-2 text-xs text-navy"
+                value={a.dividendYield != null ? (a.dividendYield * 100).toFixed(2) : ""}
+                placeholder=""
+                onChange={(e) => onUpdate(idx, {
+                  dividendYield: e.target.value ? Number(e.target.value) / 100 : undefined,
+                })}
+              />
+              <span className="text-xs text-slate-400">%</span>
+            </div>
+          )}
         </td>
       )}
 
