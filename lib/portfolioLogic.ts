@@ -24,7 +24,7 @@ export interface PortfolioAssetInput {
   buy_price: number | null;
   amount: number;
   amount_type: "quantity" | "value";
-  is_hedged: boolean;
+  is_hedged: boolean;        // 항상 false — 환노출 고정
   needs_review: boolean;
   review_reason?: string | null;
   current_price?: number;
@@ -33,10 +33,10 @@ export interface PortfolioAssetInput {
   gain?: number;
   price_source?: string;
   _rawAmount?: string;
-  ticker?: string;       // Yahoo Finance 티커 — 설정 시 이름 해석(Gemini) 생략
-  productType?: string;  // 상품 유형 (ETF, 개별주식, 채권 등)
-  dividendYield?: number;
-  trailingAnnualDividendRate?: number;
+  ticker?: string;           // Yahoo Finance 티커 — 설정 시 이름 해석(Gemini) 생략
+  productType?: string;      // 통합 상품유형 (국내주식|해외주식|국내채권|해외채권|국내ETF|해외ETF|예적금/현금)
+  bond_yield?: number | null;    // 채권 수익률(%) — 채권 유형일 때만
+  bond_maturity?: number | null; // 채권 만기(년) — 채권 유형일 때만
 }
 
 export interface RunAnalysisResult {
@@ -96,9 +96,13 @@ export const runAnalysis = async (
   // 이 방식은 FOREIGN_CLASSES 열거 없이도 금·암호화폐·해외ETF 등을 자동 처리한다.
   const enrichedAssets = await Promise.all(
     assets.map(async (a) => {
-      if (a.amount_type !== "quantity" || !a.name) return a;
-      // 현재가 AND 배당 모두 있으면 재조회 불필요
-      if (a.current_price != null && a.current_price > 0 && a.dividendYield != null) return a;
+      if (
+        a.amount_type !== "quantity" ||
+        !a.name ||
+        (a.current_price != null && a.current_price > 0)
+      ) {
+        return a;
+      }
       try {
         const TICKER_RE = /^[\w.\-=^]+$/;
         const queryParam =
@@ -126,31 +130,7 @@ export const runAnalysis = async (
           const isUsd = (meta?.currency ?? "USD") === "USD";
           const priceKrw = isUsd ? lastPrice * currentExchangeRate : lastPrice;
           const cvKrw = a.amount * priceKrw;
-
-          // 배당률: 기존 값이 없을 때만 API 응답에서 보완
-          const dy =
-            typeof json?.dividendYield === "number" && json.dividendYield > 0
-              ? json.dividendYield
-              : typeof meta?.dividendYield === "number" && meta.dividendYield > 0
-                ? meta.dividendYield
-                : typeof meta?.trailingAnnualDividendYield === "number" && meta.trailingAnnualDividendYield > 0
-                  ? meta.trailingAnnualDividendYield
-                  : undefined;
-          const tadr =
-            typeof json?.trailingAnnualDividendRate === "number" && json.trailingAnnualDividendRate > 0
-              ? json.trailingAnnualDividendRate
-              : typeof meta?.trailingAnnualDividendRate === "number" && meta.trailingAnnualDividendRate > 0
-                ? meta.trailingAnnualDividendRate
-                : undefined;
-
-          return {
-            ...a,
-            current_price: priceKrw,
-            current_value: cvKrw,
-            // 분석 시 Yahoo Finance 최신 배당 데이터로 항상 갱신
-            ...(dy   != null ? { dividendYield:              dy   } : {}),
-            ...(tadr != null ? { trailingAnnualDividendRate: tadr } : {}),
-          };
+          return { ...a, current_price: priceKrw, current_value: cvKrw };
         }
       } catch {
         /* 조회 실패 시 기존 값 유지 */
