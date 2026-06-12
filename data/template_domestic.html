@@ -147,6 +147,19 @@ function greedyOptimal(corr,tickers,k,locked){
   const sectors=Object.fromEntries(tickers.map(t=>[t,SECTORS[t].sector]));
   const pd = PERIOD_DATA[curPeriod];
 
+  // conservative: median 기준 정규화 (극단 outlier가 maxVol을 잡아
+  // 일반 ETF까지 채권과 동일한 0.25로 떨어지는 문제 방지)
+  const sortedByVol=[...tickers].sort((a,b)=>pd.scores[a]-pd.scores[b]);
+  const medianVol=pd.scores[sortedByVol[Math.floor(sortedByVol.length/2)]];
+  const normVol=t=>Math.min(Math.max(pd.scores[t]/medianVol,0.25),2.0);
+
+  const calcScore=(a,b)=>{
+    const c=corr[a][b];
+    if(STRATEGY_TYPE==="aggressive"||STRATEGY_TYPE==="balanced")
+      return c/((pd.scores[a]+pd.scores[b])||0.001);
+    return (c+1.01)*(normVol(a)+normVol(b));
+  };
+
   let selected=locked?[locked]:[];
   let usedSectors=new Set(selected.map(t=>sectors[t]));
   let remaining=tickers.filter(t=>!selected.includes(t));
@@ -157,14 +170,7 @@ function greedyOptimal(corr,tickers,k,locked){
       for(let j=i+1;j<remaining.length;j++){
         const a=remaining[i],b=remaining[j];
         if(sectors[a]===sectors[b])continue;
-
-        let score = 0;
-        if(STRATEGY_TYPE === "aggressive" || STRATEGY_TYPE === "balanced") {
-          score = corr[a][b] / ((pd.scores[a] + pd.scores[b]) || 0.001);
-        } else {
-          score = (corr[a][b] + 1.01) * (pd.scores[a] + pd.scores[b]);
-        }
-
+        const score=calcScore(a,b);
         if(score<bestScore){bestScore=score;bestPair=[a,b];}
       }
     }
@@ -176,12 +182,7 @@ function greedyOptimal(corr,tickers,k,locked){
     if(!cands.length)cands=[...remaining];
     let best=null,bestAvg=999999;
     for(const t of cands){
-      let avg = 0;
-      if(STRATEGY_TYPE === "aggressive" || STRATEGY_TYPE === "balanced") {
-        avg = selected.reduce((s,s2)=>s + (corr[t][s2]/((pd.scores[t]+pd.scores[s2])||0.001)),0)/selected.length;
-      } else {
-        avg = selected.reduce((s,s2)=>s + ((corr[t][s2]+1.01)*(pd.scores[t]+pd.scores[s2])),0)/selected.length;
-      }
+      const avg=selected.reduce((s,s2)=>s+calcScore(t,s2),0)/selected.length;
       if(avg<bestAvg){bestAvg=avg;best=t;}
     }
     if(!best)break;

@@ -1,10 +1,9 @@
 /**
- * /api/etf-correlation-html
- * GET ?strategy=balanced&k=3
- *   → data/etf_b1.json + data/etf_b2.json 읽기
- *   → 공통 날짜 교집합 기준 6개 기간 상관행렬 연산
- *   → data/template.html 에 PERIOD_DATA 주입하여 완성 HTML 반환
- * 1시간 인메모리 캐시 (strategy × k 조합별)
+ * /api/etf-correlation-html  GET ?strategy=balanced&k=3
+ * - slice-specific 점수 계산 (Bug A fix)
+ * - CAGR 동적 연환산, Rf=4% Sharpe (Bug B fix)
+ * - 몬테카를로 비중 최적화 (역변동성 대체)
+ * - 1시간 인메모리 캐시
  */
 
 export const runtime = 'nodejs';
@@ -36,11 +35,12 @@ interface PeriodResult {
   scores: Record<string, number>;
 }
 
-// ── 캐시: 연산 결과(PeriodData)만 1시간 캐시, 템플릿은 매번 읽음 ───────────
+// ── 캐시 ─────────────────────────────────────────────────────────────────────
 const dataCache = new Map<string, { data: Record<string, unknown>; ts: number }>();
 const CACHE_TTL = 60 * 60 * 1000;
+const RF_RATE = 0.04;
 
-// ── 섹터 맵 (그리디 알고리즘 섹터 다양성 제약) ──────────────────────────────
+// ── 섹터 맵 ───────────────────────────────────────────────────────────────────
 const SECTOR_MAP: Record<string, string> = {
   SOXX: '반도체',     URA:  '원자력·우라늄', AIQ:  'AI·빅데이터',  CIBR: '사이버보안',
   BOTZ: '로보틱스',   ICLN: '청정에너지',   XAR:  '방산·우주항공', ARKG: '바이오테크',
@@ -80,7 +80,6 @@ function computeReturns(prices: number[]): number[] {
   return prices.slice(1).map((p, i) => p / prices[i] - 1);
 }
 
-/** null 값 순방향 채우기 (ffill) */
 function ffill(arr: (number | null)[]): number[] {
   let last = 0;
   return arr.map((v) => {
@@ -89,7 +88,7 @@ function ffill(arr: (number | null)[]): number[] {
   });
 }
 
-// ── 그리디 최적 포트폴리오 선택 ───────────────────────────────────────────────
+// ── 그리디 종목 선정 (섹터 다양성 제약, slice-specific scores 수신) ───────────
 
 function greedyOptimal(
   cm: Record<string, Record<string, number>>,
@@ -102,20 +101,26 @@ function greedyOptimal(
   const sectors: Record<string, string> = {};
   for (const t of tickers) sectors[t] = SECTOR_MAP[t] ?? 'other';
 
+  // conservative: vol을 중간값(median) 기준으로 정규화, 하한 0.25 상한 2.0 적용.
+  // maxVol 기준은 UNG 같은 극단 outlier 하나가 기준이 되면 VOO/VTI까지
+  // 채권과 같은 normVol(0.25)로 무너져 vol 항이 무의미해지는 문제 발생.
+  const sortedByVol = [...tickers].sort((a, b) => vols[a] - vols[b]);
+  const medianVol = vols[sortedByVol[Math.floor(sortedByVol.length / 2)]];
+  const normVol = (t: string) => Math.min(Math.max(vols[t] / medianVol, 0.25), 2.0);
+
   const calcScore = (a: string, b: string): number => {
     const c = cm[a][b];
     if (strategy === 'aggressive' || strategy === 'balanced') {
       const denom = scores[a] + scores[b];
       return c / (denom > 0 ? denom : 0.001);
     }
-    return (c + 1.01) * (vols[a] + vols[b]);
+    return (c + 1.01) * (normVol(a) + normVol(b));
   };
 
   const selected: string[] = [];
   const usedSectors = new Set<string>();
   let remaining = [...tickers];
 
-  // 최적 시작 페어 탐색
   let bestPair: [string, string] | null = null;
   let bestScore = 999999;
   for (let i = 0; i < remaining.length; i++) {
@@ -134,11 +139,9 @@ function greedyOptimal(
     }
   }
 
-  // 나머지 종목 그리디 추가
   while (selected.length < k && remaining.length > 0) {
     let cands = remaining.filter((t) => !usedSectors.has(sectors[t]));
     if (!cands.length) cands = [...remaining];
-
     let best: string | null = null;
     let bestAvg = 999999;
     for (const t of cands) {
@@ -154,7 +157,70 @@ function greedyOptimal(
   return selected.slice(0, k);
 }
 
-// ── 핵심 연산: 기간별 상관행렬 + 최적 포트폴리오 ─────────────────────────────
+// ── 몬테카를로 비중 최적화 (역변동성 대체) ────────────────────────────────────
+
+function monteCarloWeights(
+  assets: string[],
+  annRets: Record<string, number>,
+  annVols: Record<string, number>,
+  corrMatrix: Record<string, Record<string, number>>,
+  strategy: Strategy,
+  iterations = 20000,
+): Record<string, number> {
+  const k = assets.length;
+  const MAX_W = 0.45;
+  const MIN_W = 0.05;
+
+  // 연환산 공분산 행렬 사전 계산: cov(i,j) = corr(i,j) * annVol_i * annVol_j
+  const cov: number[][] = [];
+  for (let i = 0; i < k; i++) {
+    cov.push([]);
+    for (let j = 0; j < k; j++) {
+      cov[i].push(
+        corrMatrix[assets[i]][assets[j]] * annVols[assets[i]] * annVols[assets[j]],
+      );
+    }
+  }
+
+  const annRetsArr = assets.map((t) => annRets[t]);
+
+  // 등비중 초기값 (제약 미충족 시 폴백)
+  let bestW: number[] = Array(k).fill(1 / k);
+  let bestScore = strategy === 'conservative' ? Infinity : -Infinity;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const raw = Array.from({ length: k }, () => Math.random());
+    const total = raw.reduce((a, b) => a + b, 0);
+    const w = raw.map((v) => v / total);
+
+    if (w.some((v) => v > MAX_W || v < MIN_W)) continue;
+
+    let pRet = 0;
+    for (let i = 0; i < k; i++) pRet += w[i] * annRetsArr[i];
+
+    let pVar = 0;
+    for (let i = 0; i < k; i++) {
+      for (let j = 0; j < k; j++) pVar += w[i] * w[j] * cov[i][j];
+    }
+    const pVol = Math.sqrt(Math.max(pVar, 0));
+
+    const score =
+      strategy === 'conservative'
+        ? pVol
+        : (pRet - RF_RATE) / (pVol || 0.0001);
+
+    if (strategy === 'conservative' ? score < bestScore : score > bestScore) {
+      bestScore = score;
+      bestW = [...w];
+    }
+  }
+
+  const result: Record<string, number> = {};
+  assets.forEach((t, i) => { result[t] = Math.round(bestW[i] * 10000) / 10000; });
+  return result;
+}
+
+// ── 핵심 연산 ─────────────────────────────────────────────────────────────────
 
 function computePeriodData(
   b1: ETFBatch,
@@ -173,7 +239,7 @@ function computePeriodData(
   const idx2: Record<string, number> = {};
   b2.dates.forEach((d, i) => { idx2[d] = i; });
 
-  // 3. 공통 날짜 기준 전체 가격 배열 구성 (ffill 적용)
+  // 3. 전체 가격 배열 (ffill)
   const tickers = TICKERS_ORDERED;
   const pricesAll: Record<string, number[]> = {};
   for (const t of b1.tickers) {
@@ -183,32 +249,6 @@ function computePeriodData(
     pricesAll[t] = ffill(commonDates.map((d) => b2.prices[t]?.[idx2[d]] ?? null));
   }
 
-  // 4. 전략별 스코어 계산 (전체 데이터셋 기준 - 모든 기간에 동일 사용)
-  const allVols: Record<string, number> = {};
-  const strategyScores: Record<string, number> = {};
-
-  for (const t of tickers) {
-    const rets = computeReturns(pricesAll[t]);
-    const mean = rets.reduce((s, v) => s + v, 0) / (rets.length || 1);
-    const variance = rets.reduce((s, v) => s + (v - mean) ** 2, 0) / (rets.length || 1);
-    const std = Math.sqrt(variance) || 0.0001;
-    allVols[t] = std;
-
-    const annReturn = pricesAll[t][pricesAll[t].length - 1] / pricesAll[t][0] - 1;
-
-    if (strategy === 'aggressive') {
-      strategyScores[t] = annReturn > 0 ? annReturn : 0.001;
-    } else if (strategy === 'balanced') {
-      const annRetAnnual = annReturn / 3;
-      const sharpe = std > 0 ? annRetAnnual / (std * Math.sqrt(252)) : 0;
-      strategyScores[t] = sharpe > 0 ? sharpe : 0.001;
-    } else {
-      // conservative: 낮은 변동성이 높은 점수
-      strategyScores[t] = std;
-    }
-  }
-
-  // 5. 기간 슬라이스별 연산
   const PERIOD_SLICES: Record<string, number> = {
     '1W': 5, '1M': 21, '3M': 63, '6M': 126, '1Y': 252, '3Y': N,
   };
@@ -217,16 +257,56 @@ function computePeriodData(
 
   for (const [pname, nDays] of Object.entries(PERIOD_SLICES)) {
     const sl = Math.min(nDays, N);
+    if (sl < 2) continue;
     const startIdx = N - sl;
     const datesSl = commonDates.slice(startIdx);
 
+    // 슬라이스 가격 및 수익률
     const pricesSl: Record<string, number[]> = {};
-    for (const t of tickers) pricesSl[t] = pricesAll[t].slice(startIdx);
-
     const retsSl: Record<string, number[]> = {};
-    for (const t of tickers) retsSl[t] = computeReturns(pricesSl[t]);
+    for (const t of tickers) {
+      pricesSl[t] = pricesAll[t].slice(startIdx);
+      retsSl[t] = computeReturns(pricesSl[t]);
+    }
 
-    // 상관행렬 (대칭 활용)
+    // ── slice-specific 점수 계산 (Bug A + B + Rf 수정) ─────────────────────
+    const sliceVols: Record<string, number> = {};        // 일간 std (greedy용)
+    const sliceAnnVols: Record<string, number> = {};     // 연환산 vol (MC용)
+    const sliceAnnRets: Record<string, number> = {};     // 산술 평균 연환산 수익률 (MC용)
+    const strategyScores: Record<string, number> = {};   // greedy 점수
+
+    for (const t of tickers) {
+      const rets = retsSl[t];
+      const n = rets.length || 1;
+      const mean = rets.reduce((s, v) => s + v, 0) / n;
+      const variance = rets.reduce((s, v) => s + (v - mean) ** 2, 0) / n;
+      const std = Math.sqrt(variance) || 0.0001;
+      const annVol = std * Math.sqrt(252);
+
+      sliceVols[t] = std;
+      sliceAnnVols[t] = annVol;
+      sliceAnnRets[t] = mean * 252;
+
+      // CAGR (동적 연환산 — 하드코딩 /3 제거)
+      const firstP = pricesSl[t][0];
+      const lastP = pricesSl[t][pricesSl[t].length - 1];
+      const years = sl / 252;
+      const cagr = firstP > 0 && years > 0
+        ? Math.pow(lastP / firstP, 1 / years) - 1
+        : 0;
+
+      if (strategy === 'aggressive') {
+        strategyScores[t] = cagr > 0 ? cagr : 0.001;
+      } else if (strategy === 'balanced') {
+        const sharpe = (cagr - RF_RATE) / (annVol || 0.0001);
+        strategyScores[t] = sharpe > 0 ? sharpe : 0.001;
+      } else {
+        // conservative: 변동성 낮을수록 선호
+        strategyScores[t] = annVol;
+      }
+    }
+
+    // ── 상관행렬 ───────────────────────────────────────────────────────────
     const cm: Record<string, Record<string, number>> = {};
     for (let i = 0; i < tickers.length; i++) {
       const t = tickers[i];
@@ -252,8 +332,8 @@ function computePeriodData(
     }
     const globalAvg = pairSum / pairCnt;
 
-    // 그리디 최적 선택
-    const optimal = greedyOptimal(cm, tickers, k, strategy, allVols, strategyScores);
+    // ── 그리디 종목 선정 (slice-specific scores) ───────────────────────────
+    const optimal = greedyOptimal(cm, tickers, k, strategy, sliceVols, strategyScores);
 
     let optPairSum = 0, optPairCnt = 0;
     for (let i = 0; i < optimal.length; i++) {
@@ -264,12 +344,10 @@ function computePeriodData(
     const optAvgCorr = optPairCnt ? optPairSum / optPairCnt : 0;
     const optScore = Math.max(0, Math.min(100, Math.round((1 - optAvgCorr) * 100)));
 
-    // 역변동성 가중치
-    const invVols: Record<string, number> = {};
-    for (const t of optimal) invVols[t] = allVols[t] > 0 ? 1 / allVols[t] : 1000;
-    const totalInv = Object.values(invVols).reduce((s, v) => s + v, 0);
-    const cappedWeights: Record<string, number> = {};
-    for (const t of optimal) cappedWeights[t] = invVols[t] / totalInv;
+    // ── 몬테카를로 비중 최적화 ─────────────────────────────────────────────
+    const cappedWeights = monteCarloWeights(
+      optimal, sliceAnnRets, sliceAnnVols, cm, strategy,
+    );
 
     result[pname] = {
       start: datesSl[0],
@@ -299,13 +377,12 @@ export async function GET(request: Request): Promise<Response> {
   )
     ? url.searchParams.get('strategy')
     : 'balanced') as Strategy;
-  const k = Math.min(8, Math.max(2, parseInt(url.searchParams.get('k') ?? '3', 10)));
+  const k = Math.min(8, Math.max(3, parseInt(url.searchParams.get('k') ?? '3', 10)));
 
   const cacheKey = `${strategy}-${k}`;
   const dataDir = path.join(process.cwd(), 'data');
 
   try {
-    // 연산 결과 캐시 확인 (무거운 상관행렬 계산만 캐시)
     let periodData: Record<string, unknown>;
     const hit = dataCache.get(cacheKey);
     if (hit && Date.now() - hit.ts < CACHE_TTL) {
@@ -317,13 +394,12 @@ export async function GET(request: Request): Promise<Response> {
       dataCache.set(cacheKey, { data: periodData, ts: Date.now() });
     }
 
-    // 템플릿은 매번 읽어서 파일 변경사항 즉시 반영
     const tmpl = fs.readFileSync(path.join(dataDir, 'template.html'), 'utf-8');
 
     const strategyTexts: Record<Strategy, string> = {
-      conservative: '🛡️ 보수형 (Conservative → 상관계수+변동성 댐핑 리스크 낮춤)',
-      balanced: '⚖️ 밸런스형 (Balanced → 상관계수+중립적 리스크 효율 모델)',
-      aggressive: '🔥 공격형 (Aggressive → 상관계수+높은 수익률 모델)',
+      conservative: '🛡️ 안전형 (Conservative → 상관계수+변동성 댐핑 리스크 낮춤)',
+      balanced:     '⚖️ 밸런스형 (Balanced → 상관계수+샤프지수 최대화)',
+      aggressive:   '🔥 공격형 (Aggressive → 상관계수+CAGR 최대화)',
     };
 
     const html = tmpl
@@ -333,13 +409,16 @@ export async function GET(request: Request): Promise<Response> {
       .replace('##STRATEGY_TXT##', strategyTexts[strategy]);
 
     return new Response(html, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
     });
   } catch (err) {
     console.error('[etf-correlation-html]', err);
-    return new Response('<h1>ETF 데이터 로드 실패</h1><p>data/etf_b1.json, etf_b2.json, template.html 파일을 확인하세요.</p>', {
-      status: 500,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-    });
+    return new Response(
+      '<h1>ETF 데이터 로드 실패</h1><p>data/etf_b1.json, etf_b2.json, template.html 파일을 확인하세요.</p>',
+      { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    );
   }
 }

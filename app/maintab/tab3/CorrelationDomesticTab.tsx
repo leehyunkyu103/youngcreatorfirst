@@ -18,7 +18,7 @@ function scoreToStrategy(score: number): Strategy {
 }
 
 function buildSrc(strategy: Strategy, k: number): string {
-  return `/api/etf-correlation-domestic-html?strategy=${strategy}&k=${k}`;
+  return `/api/etf-correlation-domestic-html?strategy=${strategy}&k=${k}&_t=${Date.now()}`;
 }
 
 export default function CorrelationDomesticTab() {
@@ -41,11 +41,9 @@ export default function CorrelationDomesticTab() {
   }, [riskResult.score]);
 
   const handleApply = useCallback(() => {
-    const next = buildSrc(strategy, k);
-    if (next === activeSrc) return;
     setLoading(true);
-    setActiveSrc(next);
-  }, [strategy, k, activeSrc]);
+    setActiveSrc(buildSrc(strategy, k));
+  }, [strategy, k]);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white shadow-soft overflow-hidden">
@@ -77,7 +75,7 @@ export default function CorrelationDomesticTab() {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">추천 ETF 수 (K)</span>
           <div className="flex rounded-md overflow-hidden border border-slate-200">
-            {[2, 3, 4, 5].map((n) => (
+            {[3, 4, 5].map((n) => (
               <button
                 key={n}
                 type="button"
