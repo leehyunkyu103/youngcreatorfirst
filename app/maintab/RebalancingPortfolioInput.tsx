@@ -4,18 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, FileUp, Loader2, Plus, RotateCcw, Sparkles, X } from "lucide-react";
 import type { PortfolioAsset } from "./CustomerContext";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Constants (탭 2-1 ExistingPortfolioTab 동일 사양) ───────────────────────
 
-const ASSET_CLASSES = [
-  "국내주식", "해외주식", "국내채권", "해외채권", "금", "리츠", "현금", "달러",
-];
+const UNIFIED_PRODUCT_TYPES = [
+  "국내주식", "해외주식", "국내채권", "해외채권",
+  "국내ETF", "해외ETF", "예적금/현금",
+  "금", "리츠", "외화", "암호화폐",
+] as const;
 
-const PRODUCT_TYPES = [
-  "개별주식", "ETF", "채권", "리츠", "펀드", "현금", "외화", "암호화폐",
-];
+const BOND_TYPES = new Set<string>(["국내채권", "해외채권"]);
 
 const COUNTRIES = ["한국", "미국", "일본", "중국", "유럽", "기타"];
 
+// 탭 2-1과 동일한 EMPTY_ASSET (bond 필드 포함)
 const EMPTY_ASSET: PortfolioAsset = {
   name: "",
   asset_class: "해외주식",
@@ -27,8 +28,53 @@ const EMPTY_ASSET: PortfolioAsset = {
   is_hedged: false,
   needs_review: false,
   ticker: "",
-  productType: "ETF",
+  productType: "해외주식",
+  bond_yield: null,
+  bond_maturity: null,
 };
+
+// ─── Helpers (탭 2-1 ExistingPortfolioTab 완전 동일) ─────────────────────────
+
+// 통합 productType → asset_class 매핑 (계산 파이프라인 호환)
+function deriveAssetClass(unifiedType: string): string {
+  switch (unifiedType) {
+    case "국내주식":    return "국내주식";
+    case "해외주식":    return "해외주식";
+    case "국내채권":    return "국내채권";
+    case "해외채권":    return "해외채권";
+    case "국내ETF":     return "국내주식";
+    case "해외ETF":     return "해외주식";
+    case "예적금/현금": return "현금";
+    case "금":          return "금";
+    case "리츠":        return "리츠";
+    case "외화":        return "달러";
+    case "암호화폐":    return "암호화폐";
+    default:            return "해외주식";
+  }
+}
+
+// 통합 productType → 기본 country 매핑
+function deriveCountry(unifiedType: string): string {
+  if (unifiedType.startsWith("국내") || unifiedType === "예적금/현금") return "한국";
+  if (unifiedType === "외화" || unifiedType === "암호화폐") return "기타";
+  if (unifiedType === "금" || unifiedType === "리츠") return "미국";
+  return "미국";
+}
+
+// Gemini 응답의 (assetClass, productType) 조합 → 통합 productType 변환
+function toUnifiedProductType(assetClass: string, productType: string): string {
+  const isEtf = productType === "ETF";
+  if (assetClass === "국내주식") return isEtf ? "국내ETF" : "국내주식";
+  if (assetClass === "해외주식") return isEtf ? "해외ETF" : "해외주식";
+  if (assetClass === "국내채권") return isEtf ? "국내ETF" : "국내채권";
+  if (assetClass === "해외채권") return isEtf ? "해외ETF" : "해외채권";
+  if (assetClass === "현금" || assetClass === "달러") return "예적금/현금";
+  if (assetClass === "금")          return "금";
+  if (assetClass === "리츠")        return "리츠";
+  if (productType === "외화")       return "외화";
+  if (productType === "암호화폐")   return "암호화폐";
+  return isEtf ? "해외ETF" : "해외주식";
+}
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -73,7 +119,6 @@ export default function RebalancingPortfolioInput({
           return;
         }
       }
-      // 자신의 key가 없으면 seed key에서 복사 (한 번만)
       const seed = localStorage.getItem(seedStorageKey);
       if (seed) {
         const parsed = JSON.parse(seed) as PortfolioAsset[];
@@ -101,9 +146,7 @@ export default function RebalancingPortfolioInput({
       const seed = localStorage.getItem(seedStorageKey);
       if (seed) {
         const parsed = JSON.parse(seed) as PortfolioAsset[];
-        if (Array.isArray(parsed)) {
-          setPortfolioAssets(parsed);
-        }
+        if (Array.isArray(parsed)) setPortfolioAssets(parsed);
       }
     } catch {}
   }, [seedStorageKey]);
@@ -126,7 +169,7 @@ export default function RebalancingPortfolioInput({
     toastTimerRef.current = setTimeout(() => setToastMsg(""), 3000);
   }, []);
 
-  // ── Gemini AI 자동 추론 ───────────────────────────────────────────────────
+  // ── Gemini AI 자동 추론 — 탭 2-1 동일 매핑 파이프라인 ────────────────────
 
   const handleSmartInference = useCallback(
     async (idx: number, name: string) => {
@@ -145,11 +188,21 @@ export default function RebalancingPortfolioInput({
           showToast(`'${name}'의 티커를 찾을 수 없습니다. 수동으로 입력해주세요.`);
           return;
         }
+        // 탭 2-1과 동일한 통합 productType 변환 파이프라인
+        const geminiAssetClass  = typeof data.assetClass  === "string" ? data.assetClass  : "";
+        const geminiProductType = typeof data.productType === "string" ? data.productType : "";
+        const unifiedType = geminiAssetClass
+          ? toUnifiedProductType(geminiAssetClass, geminiProductType)
+          : undefined;
         updateRow(idx, {
           ticker,
-          ...(data.assetClass  ? { asset_class: data.assetClass  as string } : {}),
-          ...(data.productType ? { productType: data.productType as string } : {}),
-          ...(data.country     ? { country:     data.country     as string } : {}),
+          ...(unifiedType ? {
+            productType: unifiedType,
+            asset_class: deriveAssetClass(unifiedType),
+            country:     deriveCountry(unifiedType),
+          } : {}),
+          ...(!unifiedType && data.country ? { country: data.country as string } : {}),
+          is_hedged: false,
         });
         showToast(`'${name}' → ${ticker} 자동 완성`);
       } catch (err) {
@@ -230,14 +283,27 @@ export default function RebalancingPortfolioInput({
           </div>
         )}
 
-        {/* 자산 입력 테이블 */}
+        {/* 자산 입력 테이블 — 탭 2-1과 동일한 8컬럼 구성 */}
         {portfolioAssets.length > 0 ? (
           <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
             <table className="w-full text-sm">
               <thead className="border-b border-slate-200 bg-slate-50">
                 <tr>
-                  {["종목명", "티커", "상품유형", "투자국가", "자산군", "수량(주/개)", "매수단가(원화)", "환헤지", ""].map((h) => (
-                    <th key={h} className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-bold text-slate-500">
+                  {[
+                    "종목명",
+                    "티커",
+                    "상품유형",
+                    "투자국가",
+                    "수량(주/개)",
+                    "매수단가(원화)",
+                    "채권수익률(%)",
+                    "만기(년)",
+                    "",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-bold text-slate-500"
+                    >
                       {h}
                     </th>
                   ))}
@@ -274,7 +340,7 @@ export default function RebalancingPortfolioInput({
   );
 }
 
-// ─── AssetRow ─────────────────────────────────────────────────────────────────
+// ─── AssetRow (탭 2-1 ExistingPortfolioTab AssetRow 완전 동일 사양) ──────────
 
 interface AssetRowProps {
   idx: number;
@@ -292,31 +358,61 @@ function AssetRow({
   idx, asset: a, isInferring, editingTicker,
   onUpdate, onRemove, onInfer, onStartEditTicker, onEndEditTicker,
 }: AssetRowProps) {
+  const isBond = BOND_TYPES.has(a.productType ?? "");
+
+  const handleProductTypeChange = (val: string) => {
+    onUpdate(idx, {
+      productType: val,
+      asset_class: deriveAssetClass(val),
+      country:     deriveCountry(val),
+      is_hedged:   false,
+      // 채권 외 유형으로 변경 시 채권 전용 필드 초기화
+      ...(!BOND_TYPES.has(val) ? { bond_yield: null, bond_maturity: null } : {}),
+    });
+  };
+
   return (
     <tr className="bg-white hover:bg-slate-50">
+
+      {/* 종목명 + Gemini 자동완성 버튼 */}
       <td className="px-3 py-2">
         <div className="flex items-center gap-1">
           <input
-            className="h-9 w-28 rounded border border-slate-200 px-2 text-xs text-navy"
-            placeholder="종목명"
-            value={a.name}
+            className={[
+              "h-9 w-28 rounded border px-2 text-xs text-navy",
+              isBond
+                ? "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400"
+                : "border-slate-200",
+            ].join(" ")}
+            placeholder={isBond ? "채권(직접입력불가)" : "종목명"}
+            value={isBond ? "" : a.name}
+            disabled={isBond}
             onChange={(e) => onUpdate(idx, { name: e.target.value })}
-            onBlur={(e) => { if (e.target.value.trim()) onInfer(idx, e.target.value.trim()); }}
+            onBlur={(e) => {
+              if (!isBond && e.target.value.trim()) onInfer(idx, e.target.value.trim());
+            }}
           />
           <button
             type="button"
             title="Gemini AI 자동 완성"
-            disabled={isInferring || !a.name.trim()}
+            disabled={isBond || isInferring || !a.name.trim()}
             onClick={() => onInfer(idx, a.name)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-violet-200 bg-violet-50 text-violet-500 transition hover:bg-violet-100 disabled:opacity-40"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-violet-200 bg-violet-50 text-violet-500 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isInferring ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            {isInferring
+              ? <Loader2 size={13} className="animate-spin" />
+              : <Sparkles size={13} />}
           </button>
         </div>
       </td>
 
+      {/* 티커 — 채권일 때 disabled, 아니면 더블클릭 인라인 편집 */}
       <td className="px-3 py-2">
-        {editingTicker ? (
+        {isBond ? (
+          <span className="flex h-9 min-w-[96px] cursor-not-allowed items-center rounded bg-slate-100 px-2 font-mono text-xs text-slate-400">
+            —
+          </span>
+        ) : editingTicker ? (
           <input
             autoFocus
             className="h-9 w-28 rounded border border-blue-300 bg-blue-50 px-2 text-xs font-mono text-navy outline-none"
@@ -336,17 +432,21 @@ function AssetRow({
         )}
       </td>
 
+      {/* 통합 상품유형 (UNIFIED_PRODUCT_TYPES) */}
       <td className="px-3 py-2">
         <select
           className="h-9 rounded border border-slate-200 px-2 text-xs text-navy"
           value={a.productType ?? ""}
-          onChange={(e) => onUpdate(idx, { productType: e.target.value })}
+          onChange={(e) => handleProductTypeChange(e.target.value)}
         >
           <option value="">선택</option>
-          {PRODUCT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          {UNIFIED_PRODUCT_TYPES.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
         </select>
       </td>
 
+      {/* 투자국가 */}
       <td className="px-3 py-2">
         <select
           className="h-9 rounded border border-slate-200 px-2 text-xs text-navy"
@@ -357,16 +457,7 @@ function AssetRow({
         </select>
       </td>
 
-      <td className="px-3 py-2">
-        <select
-          className="h-9 rounded border border-slate-200 px-2 text-xs text-navy"
-          value={a.asset_class}
-          onChange={(e) => onUpdate(idx, { asset_class: e.target.value })}
-        >
-          {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </td>
-
+      {/* 수량(주/개) */}
       <td className="px-3 py-2">
         <input
           type="number"
@@ -377,6 +468,7 @@ function AssetRow({
         />
       </td>
 
+      {/* 매수단가(원화) */}
       <td className="px-3 py-2">
         <input
           type="number"
@@ -387,15 +479,43 @@ function AssetRow({
         />
       </td>
 
-      <td className="px-3 py-2 text-center">
+      {/* 채권수익률(%) — 채권 유형일 때만 활성화 */}
+      <td className="px-3 py-2">
         <input
-          type="checkbox"
-          checked={a.is_hedged}
-          onChange={(e) => onUpdate(idx, { is_hedged: e.target.checked })}
-          className="h-4 w-4 accent-samsung"
+          type="number"
+          step="0.01"
+          className={[
+            "h-9 w-20 rounded border px-2 text-xs",
+            isBond
+              ? "border-slate-200 text-navy"
+              : "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400",
+          ].join(" ")}
+          placeholder={isBond ? "예: 3.5" : "—"}
+          value={isBond ? (a.bond_yield ?? "") : ""}
+          disabled={!isBond}
+          onChange={(e) => onUpdate(idx, { bond_yield: e.target.value ? Number(e.target.value) : null })}
         />
       </td>
 
+      {/* 만기(년) — 채권 유형일 때만 활성화 */}
+      <td className="px-3 py-2">
+        <input
+          type="number"
+          step="1"
+          className={[
+            "h-9 w-16 rounded border px-2 text-xs",
+            isBond
+              ? "border-slate-200 text-navy"
+              : "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400",
+          ].join(" ")}
+          placeholder={isBond ? "예: 5" : "—"}
+          value={isBond ? (a.bond_maturity ?? "") : ""}
+          disabled={!isBond}
+          onChange={(e) => onUpdate(idx, { bond_maturity: e.target.value ? Number(e.target.value) : null })}
+        />
+      </td>
+
+      {/* 삭제 */}
       <td className="px-3 py-2">
         <button
           type="button"
