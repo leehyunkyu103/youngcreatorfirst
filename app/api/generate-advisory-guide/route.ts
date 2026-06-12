@@ -319,7 +319,6 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
   const financial = payload?.formData?.financial ?? {};
   const rrttllu = payload?.formData?.rrttllu ?? {};
   const risk = payload?.riskResult ?? {};
-  const liquidity = payload?.liquiditySummary ?? {};
   const smartInput = text(payload?.smartInputNote);
   const uniqueOther = text(payload?.uniqueOther ?? rrttllu.uniqueOther);
   const allQualitative = `${smartInput}\n${uniqueOther}`;
@@ -455,16 +454,6 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
       memoItems: ["월평균 잉여현금흐름"],
     });
   }
-  const requiredRatio = ratio(typeof liquidity.requiredAmount === "number" ? liquidity.requiredAmount : null, totalAssets);
-  if (requiredRatio !== null && requiredRatio >= 0.5) {
-    followUps.push({
-      text: `고객은 총자산 '${financial.totalAssets}' 중 향후 사용 예정 자금으로 '${liquidity.requiredDisplay}'를 계획하고 있습니다. 투자 가능한 자산 규모가 제한될 수 있으므로 자금 사용 시점과 유동성 확보 계획을 함께 확인하는 것이 좋습니다.`,
-      highlights: ["총자산", "향후 사용 예정 자금", "유동성 확보 계획"],
-      memoItems: ["자금 사용 시점 및 우선순위", "월평균 잉여현금흐름"],
-    });
-    checkpoints.push({ id: "liquidity-use-timing", title: "자금 사용 시점과 유동성 확보 계획" });
-  }
-
   const maxExpectedReturn = extractMaxPercent(rrttllu.expectedReturn);
   const conservativeObjective = rrttllu.returnObjective === "원금 보존 투자" || text(rrttllu.returnObjective).includes("안정적");
   const depositLikeObjective = /예금|채권이자|안정적 수익/.test(text(rrttllu.returnObjective));
@@ -540,7 +529,8 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
   }
   const useYear = earliestUseYear(`${rrttllu.lumpSumPlan}\n${rrttllu.regularCashflowNeed}`);
   const horizonYears = horizonMinYears(rrttllu.timeHorizon);
-  if (horizonYears !== null && horizonYears >= 5 && useYear !== null && useYear <= 2 && requiredRatio !== null && requiredRatio >= 0.7) {
+  const mostAssetsUseCue = /자산\s*대부분|대부분\s*사용|전액|거의\s*전부/.test(`${rrttllu.lumpSumPlan}\n${rrttllu.regularCashflowNeed}\n${rrttllu.emergencyReservePlan}\n${allQualitative}`);
+  if (horizonYears !== null && horizonYears >= 5 && useYear !== null && useYear <= 2 && mostAssetsUseCue) {
     conflicts.push({
       text: `고객은 투자기간을 '${rrttllu.timeHorizon}'으로 선택했지만, ${useYear}년 내 사용 예정 자금이 총자산 대비 큰 비중으로 입력되어 있습니다. 장기 투자 계획과 단기 자금 사용 계획이 현실적으로 양립하기 어려울 수 있어 투자 가능 자금 범위를 확인하는 것이 좋습니다.`,
       highlights: [rrttllu.timeHorizon, `${useYear}년 내 사용 예정 자금`],
@@ -611,10 +601,10 @@ function buildRuleInsights(payload: any): AdvisoryGuide {
       memoItems: ["해외주식 투자 규모 및 절세 니즈"],
     });
   }
-  if (/예금|단기채|MMF|CMA/.test(text(rrttllu.avoidedAssets)) && requiredRatio !== null && requiredRatio >= 0.5) {
+  if (/예금|단기채|MMF|CMA/.test(text(rrttllu.avoidedAssets)) && text(`${rrttllu.regularCashflowNeed}\n${rrttllu.lumpSumPlan}\n${rrttllu.emergencyReservePlan}`)) {
     followUps.push({
-      text: `고객은 예금·단기채 등 유동성 자산을 피하고 싶어 하지만 총자산 대비 필요자금 비중은 높은 편입니다. 단기 자금 수요를 어떤 방식으로 충족할지 확인하는 것이 좋습니다.`,
-      highlights: ["유동성 자산 회피", "필요자금 비중"],
+      text: `고객은 예금·단기채 등 유동성 자산을 피하고 싶어 하지만 유동성 관련 니즈도 함께 입력했습니다. 단기 자금 수요를 어떤 방식으로 충족할지 확인하는 것이 좋습니다.`,
+      highlights: ["유동성 자산 회피", "유동성 니즈"],
       memoItems: ["단기 자금 수요 충족 방안"],
     });
   }
@@ -864,12 +854,10 @@ function fallbackGuide(payload: any): AdvisoryGuide {
   const smartInput = typeof payload?.smartInputNote === "string" ? payload.smartInputNote : "";
   const uniqueOther = text(rrttllu.uniqueOther);
   const qualitative = `${smartInput}\n${uniqueOther}`;
-  const liquidity = payload?.liquiditySummary ?? {};
   const conflicts: GuideLine[] = [];
   const followUps: GuideLine[] = [];
   const explanation: GuideLine[] = [];
   const totalAssets = parseKoreanAmount(financial.totalAssets);
-  const requiredRatio = ratio(typeof liquidity.requiredAmount === "number" ? liquidity.requiredAmount : null, totalAssets);
   const maxExpectedReturn = extractMaxPercent(rrttllu.expectedReturn);
   const conservativeObjective = rrttllu.returnObjective === "원금 보존 투자" || text(rrttllu.returnObjective).includes("안정적");
   const highRiskAssetCue = /레버리지|암호화폐|가상자산|급등주|고위험|파생|선물|옵션/.test(`${rrttllu.preferredAssets}\n${rrttllu.existingAssetPlan}\n${qualitative}`);
@@ -894,7 +882,8 @@ function fallbackGuide(payload: any): AdvisoryGuide {
   }
   const useYear = earliestUseYear(`${rrttllu.lumpSumPlan}\n${rrttllu.regularCashflowNeed}`);
   const horizonYears = horizonMinYears(rrttllu.timeHorizon);
-  if (horizonYears !== null && horizonYears >= 5 && useYear !== null && useYear <= 2 && requiredRatio !== null && requiredRatio >= 0.7) {
+  const mostAssetsUseCue = /자산\s*대부분|대부분\s*사용|전액|거의\s*전부/.test(`${rrttllu.lumpSumPlan}\n${rrttllu.regularCashflowNeed}\n${rrttllu.emergencyReservePlan}\n${qualitative}`);
+  if (horizonYears !== null && horizonYears >= 5 && useYear !== null && useYear <= 2 && mostAssetsUseCue) {
     conflicts.push({
       text: `고객은 투자기간을 '${rrttllu.timeHorizon}'으로 선택했지만, ${useYear}년 내 사용 예정 자금이 총자산 대비 큰 비중으로 입력되어 있습니다. 장기 투자 계획과 단기 자금 사용 계획이 현실적으로 양립하기 어려울 수 있어 투자 가능 자금 범위를 확인하는 것이 좋습니다.`,
       highlights: [rrttllu.timeHorizon, `${useYear}년 내 사용 예정 자금`],
@@ -910,11 +899,6 @@ function fallbackGuide(payload: any): AdvisoryGuide {
       memoItems: ["비상예비자금 분리 관리 여부"],
     });
   }
-  followUps.push({
-    text: `고객은 총자산 ${financial.totalAssets || "미입력"} 중 향후 사용 예정 자금으로 ${liquidity.requiredDisplay || "미산출"}을 계획하고 있습니다. 단순히 필요자금과 투자 가능 자산을 비교하기보다 자금 사용 시점, 유동성 확보 계획, 월평균 잉여현금흐름을 함께 확인하는 것이 좋습니다.`,
-    highlights: ["총자산", "향후 사용 예정 자금", "유동성 확보 계획"],
-    memoItems: ["자금 사용 시점 및 우선순위", "월평균 잉여현금흐름"],
-  });
   if (financial.irregularIncome) {
     followUps.push({
       text: `향후 예상 비정기 소득으로 '${financial.irregularIncome}'이 입력되어 있습니다. 지급 시점과 확정 가능성에 따라 투자 시작 시점과 분할 투자 계획이 달라질 수 있습니다.`,

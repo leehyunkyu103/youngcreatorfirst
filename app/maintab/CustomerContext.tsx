@@ -120,13 +120,6 @@ export type StructuredJsonPayload = {
 
 export type ChangeEntry = { label: string; before: string; after: string; changedAt: number };
 
-export type LiquiditySummaryInfo = {
-  requiredAmount: number | null;
-  investableAmount: number | null;
-  requiredDisplay: string;
-  investableDisplay: string;
-};
-
 export type CustomerUpdatedMap = Record<CustomerId, number>;
 
 export type AppState = { financial: FinancialInfo; rrttllu: RrttlluInfo; smartInputNote: string; uniqueOtherManual: string; smartExtractedUniqueOther: string; aiGuidePbNotes: Record<string, string> };
@@ -638,19 +631,6 @@ export function parseKrwAmount(value: string | null): number | null {
   return parseSingleKrwAmount(normalized);
 }
 
-export function calculateLiquiditySummary(formData: AppState): LiquiditySummaryInfo {
-  const amounts = [
-    parseKrwAmount(nullableText(formData.rrttllu.regularCashflowNeed)),
-    parseKrwAmount(nullableText(formData.rrttllu.lumpSumPlan)),
-    parseKrwAmount(nullableText(formData.rrttllu.emergencyReservePlan)),
-  ].filter((x): x is number => x !== null);
-  const requiredAmount = amounts.length ? amounts.reduce((s, x) => s + x, 0) : null;
-  const totalAssets = parseKrwAmount(nullableText(formData.financial.totalAssets));
-  const investableAmount = requiredAmount !== null && totalAssets !== null ? Math.max(totalAssets - requiredAmount, 0) : null;
-  const fmt = (n: number | null) => n === null ? "계산 대기" : `${n.toLocaleString("ko-KR")}원`;
-  return { requiredAmount, investableAmount, requiredDisplay: fmt(requiredAmount), investableDisplay: fmt(investableAmount) };
-}
-
 export function buildStructuredJsonPayload(formData: AppState, riskResult: RiskResult, customerProfile?: CustomerProfile): StructuredJsonPayload {
   const { financial, rrttllu } = formData;
   const warnings: string[] = [];
@@ -748,7 +728,6 @@ export type CustomerContextValue = {
   rrttlluCompletion: number;
   internalJsonPayload: StructuredJsonPayload;
   warnings: string[];
-  liquiditySummary: LiquiditySummaryInfo;
   analysisRequested: boolean;
   confirmedRiskResult: RiskResult | null;
   changeHistory: ChangeEntry[];
