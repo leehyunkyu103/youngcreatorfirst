@@ -179,7 +179,6 @@ export default function ExistingPortfolioTab({ hideDividendColumn = false }: Exi
             ...a,
             current_price: enriched.current_price ?? a.current_price,
             current_value: enriched.current_value ?? a.current_value,
-            // 분석 결과로 배당 데이터 항상 갱신 (최신 Yahoo Finance 값 우선)
             ...(enriched.dividendYield              != null ? { dividendYield:              enriched.dividendYield              } : {}),
             ...(enriched.trailingAnnualDividendRate != null ? { trailingAnnualDividendRate: enriched.trailingAnnualDividendRate } : {}),
           };
@@ -534,7 +533,8 @@ function AssetRow({
       {/* 수량 */}
       <td className="px-3 py-2">
         <input
-          type="number"
+          type="text"
+          inputMode="numeric"
           className="h-9 w-24 rounded border border-slate-200 px-2 text-xs text-navy"
           placeholder="수량"
           value={a.amount || ""}
@@ -545,7 +545,8 @@ function AssetRow({
       {/* 매수단가 */}
       <td className="px-3 py-2">
         <input
-          type="number"
+          type="text"
+          inputMode="numeric"
           className="h-9 w-24 rounded border border-slate-200 px-2 text-xs text-navy"
           value={a.buy_price ?? ""}
           placeholder="단가"

@@ -168,8 +168,8 @@ export const workspaceTabs = [
   { id: "profile"   as const, label: "고객 성향 분석",       description: "기본 정보와 RRTTLLU 입력" },
   { id: "existing"  as const, label: "기존 포트폴리오 분석", description: "보유 자산, 위험 및 건강 분석" },
   { id: "create"    as const, label: "신규 포트폴리오 분석", description: "RRTTLLU 기반 신규 배분" },
-  { id: "recommend" as const, label: "상품 추천",             description: "버킷별 상품 추천" },
   { id: "compare"   as const, label: "포트폴리오 비교",       description: "기존과 신규 비교" },
+  { id: "recommend" as const, label: "상품 추천",             description: "버킷별 상품 추천" },
 ];
 
 // ── Portfolio Analysis Types ───────────────────────────────────────────────
@@ -845,6 +845,15 @@ export type CustomerContextValue = {
   updatePortfolioRow: (index: number, patch: Partial<PortfolioAsset>) => void;
   setAnalysisResult: (result: PortfolioAnalysisResult | null) => void;
   setPortfolioDirty: (dirty: boolean) => void;
+  // ── 리밸런싱 파이프라인 (탭2보유현황 → 탭2리밸런싱 → 탭3매수 → 탭5비교) ──
+  rebalancingSellAssets: PortfolioAsset[];
+  rebalancingBuyAssets: PortfolioAsset[];
+  newPortfolioAnalysisResult: PortfolioAnalysisResult | null;
+  pushToRebalancingSell: () => void;
+  setRebalancingSellAssets: (assets: PortfolioAsset[]) => void;
+  confirmRebalancingSell: () => void;
+  setRebalancingBuyAssets: (assets: PortfolioAsset[]) => void;
+  setNewPortfolioAnalysisResult: (result: PortfolioAnalysisResult | null) => void;
 };
 
 export const CustomerContext = createContext<CustomerContextValue | null>(null);
