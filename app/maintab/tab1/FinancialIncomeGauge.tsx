@@ -1,24 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Info } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle } from "lucide-react";
 
-// ─────────────────────────────────────────────
-// 상수
-// ─────────────────────────────────────────────
-export const THRESHOLD = 20_000_000; // 금융소득 종합과세 기준: 2,000만원
+// ─── 상수 ──────────────────────────────────────────────────────────────────────
+export const THRESHOLD = 20_000_000; // 금융소득 종합과세 기준
 export const FINANCIAL_INCOME_STORAGE_KEY = "financial-income-summary-v1";
+export const NEW_PORTFOLIO_INCOME_STORAGE_KEY = "new-portfolio-income-summary-v1";
 
-// ─────────────────────────────────────────────
-// 타입
-// ─────────────────────────────────────────────
+const INTEREST_WITHHOLDING  = 0.154; // 이자소득 원천징수 14% + 지방세 1.4%
+const DOMESTIC_DIV_WITHHOLDING = 0.154;
+const FOREIGN_DIV_WITHHOLDING  = 0.15;  // 미국 조세조약 기준
+
+// ─── 타입 ──────────────────────────────────────────────────────────────────────
 export interface IncomeBreakdownItem {
   name: string;
   ticker: string;
   incomeType: "배당" | "이자" | "배당(국내직접)" | "배당(해외직접)" | "배당(집합투자)";
-  annualIncome: number; // 연간 소득 (원)
-  yieldRate: number;    // 수익률 (소수)
-  value: number;        // 보유 평가액 (원)
+  annualIncome: number;    // 연간 gross 소득 (세전, 원)
+  netIncome: number;       // 실수령 (원천징수 차감, 원)
+  yieldRate: number;       // 수익률 (소수)
+  value: number;           // 보유 평가액 (원)
+  principal?: number;      // 채권 원금 (buy_price × 수량)
+  withholdingRate: number; // 원천징수율 (소수)
 }
 
 export interface CapitalGainsBreakdownItem {
@@ -30,24 +34,24 @@ export interface CapitalGainsBreakdownItem {
 }
 
 export interface FinancialIncomeSummary {
-  interestIncome: number;       // 이자소득 합계 (원)
-  dividendIncome: number;       // 배당소득 합계 (원)
-  totalCapitalGains: number;         // 손익 통산 전 총 차익 (해외)
-  totalCapitalLosses: number;        // 손익 통산 전 총 손실 (해외)
-  netCapitalGains: number;           // 손익 통산 후 순 양도차익 (해외)
-  foreignCapitalGainsTax: number;    // 해외주식·ETF·펀드 양도소득세 (22%)
-  domesticMajorShareholderTax: number; // 국내 대주주 양도소득세 (20%/25%)
-  capitalGainsTax: number;           // 양도소득세 합계
-  totalFinancialIncome: number; // 이자 + 배당 합계 (종합과세 판단 기준)
-  grossUpAmount: number;              // (Gross-up 가산액)
-  taxableFinancialIncome: number;     // (Gross-up 포함 종합과세 합산액)
-  generalTax: number;                 // (일반산출세액)
-  comparisonTax: number;              // (비교산출세액)
-  finalTax: number;                   // (MAX(일반산출세액, 비교산출세액))
-  dividendTaxCredit: number;          // (배당세액공제)
-  withholdingTax: number;             // (기납부 원천징수세액 15.4%)
-  additionalTax: number;              // (최종 추가 납부세액 = finalTax - dividendTaxCredit - withholdingTax)
-  tMarginal: number;                  // (적용 한계세율)
+  interestIncome: number;
+  dividendIncome: number;
+  totalCapitalGains: number;
+  totalCapitalLosses: number;
+  netCapitalGains: number;
+  foreignCapitalGainsTax: number;
+  domesticMajorShareholderTax: number;
+  capitalGainsTax: number;
+  totalFinancialIncome: number;
+  grossUpAmount: number;
+  taxableFinancialIncome: number;
+  generalTax: number;
+  comparisonTax: number;
+  finalTax: number;
+  dividendTaxCredit: number;
+  withholdingTax: number;
+  additionalTax: number;
+  tMarginal: number;
   isOverThreshold: boolean;
   breakdown: IncomeBreakdownItem[];
   capitalGainsBreakdown: CapitalGainsBreakdownItem[];
@@ -56,9 +60,7 @@ export interface FinancialIncomeSummary {
   updatedAt: number;
 }
 
-// ─────────────────────────────────────────────
-// 포맷 유틸
-// ─────────────────────────────────────────────
+// ─── 포맷 유틸 ─────────────────────────────────────────────────────────────────
 function fmtWon(n: number) {
   if (Math.abs(n) >= 100_000_000) return `${(n / 100_000_000).toFixed(1)}억원`;
   if (Math.abs(n) >= 10_000) return `${Math.round(n / 10_000).toLocaleString("ko-KR")}만원`;
@@ -69,12 +71,73 @@ function fmtPct(n: number) {
   return `${(n * 100).toFixed(2)}%`;
 }
 
-// ─────────────────────────────────────────────
-// 게이지 컴포넌트
-// ─────────────────────────────────────────────
+// ─── IncomeRow ─────────────────────────────────────────────────────────────────
+function IncomeRow({ item }: { item: IncomeBreakdownItem }) {
+  const isInterest = item.incomeType === "이자";
+
+  const tagLabel = isInterest ? null :
+    item.incomeType === "배당(국내직접)" ? "국내직접" :
+    item.incomeType === "배당(해외직접)" ? "해외직접" :
+    item.incomeType === "배당(집합투자)" ? "집합투자" : "배당";
+
+  return (
+    <div className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-50 last:border-0">
+      <div className="flex items-center gap-1.5 min-w-0 flex-1 text-xs">
+        <span className="font-bold text-navy truncate">{item.name}</span>
+        {item.ticker && (
+          <span className="text-[10px] text-slate-400 font-mono shrink-0">({item.ticker})</span>
+        )}
+        {isInterest ? (
+          <>
+            <span className="text-[10px] text-slate-500 shrink-0">이자율 {fmtPct(item.yieldRate)}</span>
+            {item.principal != null && item.principal > 0 && (
+              <span className="text-[10px] text-slate-400 shrink-0">원금 {fmtWon(item.principal)}</span>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="text-[10px] text-slate-500 shrink-0">배당률 {fmtPct(item.yieldRate)}</span>
+            {tagLabel && (
+              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500 shrink-0">
+                {tagLabel}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      <div className="shrink-0 text-xs font-bold text-samsung">
+        {fmtWon(item.annualIncome)}
+      </div>
+    </div>
+  );
+}
+
+// ─── CapitalGainsRow ───────────────────────────────────────────────────────────
+function CapitalGainsRow({ item }: { item: CapitalGainsBreakdownItem }) {
+  return (
+    <div className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-50 last:border-0">
+      <div className="flex items-center gap-1.5 min-w-0 flex-1 text-xs">
+        <span className="font-bold text-navy truncate">{item.name}</span>
+        {item.ticker && (
+          <span className="text-[10px] text-slate-400 font-mono shrink-0">({item.ticker})</span>
+        )}
+        <span className={`text-[10px] shrink-0 font-semibold ${item.gain >= 0 ? "text-blue-600" : "text-red-500"}`}>
+          차익 {fmtWon(item.gain)}
+        </span>
+        <span className="rounded-full bg-orange-50 px-1.5 py-0.5 text-[9px] font-bold text-orange-600 shrink-0">
+          {item.category}
+        </span>
+      </div>
+      <div className="shrink-0 text-xs font-bold text-orange-600">
+        세액 {fmtWon(item.tax)}
+      </div>
+    </div>
+  );
+}
+
+// ─── FinancialIncomeGauge ──────────────────────────────────────────────────────
 interface FinancialIncomeGaugeProps {
   summary: FinancialIncomeSummary | null;
-  /** Tab3에서 신규 상품 추가 시 delta 값 */
   additionalIncome?: number;
 }
 
@@ -108,7 +171,7 @@ export function FinancialIncomeGauge({
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-soft overflow-hidden">
 
-      {/* ── 헤더 ── */}
+      {/* 헤더 */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
         <span className="text-xs font-extrabold uppercase tracking-widest text-slate-400">
           금융소득종합과세 및 해외양도세 점검
@@ -124,25 +187,25 @@ export function FinancialIncomeGauge({
         </span>
       </div>
 
-      {/* ── 금액 + 게이지 ── */}
+      {/* 금액 + 게이지 */}
       <div className="px-4 pt-4 pb-3">
-        <div className="flex items-end gap-1.5 mb-3">
+        <div className="flex items-end gap-1.5 mb-1">
           <span className="text-3xl font-black tracking-tight text-slate-800">
             {fmtWon(totalIncome)}
           </span>
-          <span className="text-sm font-bold text-slate-400 pb-1">
-            / 2,000만원
-          </span>
+          <span className="text-sm font-bold text-slate-400 pb-1">/ 2,000만원</span>
+        </div>
+        <div className="text-[11px] text-slate-500 mb-3">
+          배당소득 {fmtWon(summary?.dividendIncome ?? 0)} + 이자소득 {fmtWon(summary?.interestIncome ?? 0)}
+          <span className="ml-1.5 text-slate-400">(세전 합산, 종합과세 기준)</span>
         </div>
 
         {/* 게이지 바 */}
         <div className="relative h-3 w-full rounded-full bg-slate-100 overflow-hidden">
-          {/* 기존 포트폴리오 */}
           <div
             className="absolute left-0 top-0 h-full rounded-full transition-all duration-700 ease-out"
             style={{ width: `${basePct}%`, backgroundColor: gaugeColor }}
           />
-          {/* Tab3 신규 추가분 */}
           {additionalIncome > 0 && (
             <div
               className="absolute top-0 h-full rounded-r-full transition-all duration-700 ease-out"
@@ -163,7 +226,7 @@ export function FinancialIncomeGauge({
           <span className="text-[10px] text-slate-400">2,000만원</span>
         </div>
 
-        {/* 초과 / 여유 메시지 */}
+        {/* 상태 메시지 */}
         <div className="mt-3">
           {isOver ? (
             <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5">
@@ -185,13 +248,11 @@ export function FinancialIncomeGauge({
         {/* 대주주 요건 알림 */}
         {summary?.majorShareholderWarning && (
           <div className="mt-3 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2.5">
-            <div className="text-xs font-bold text-orange-700 mb-1">
-              ⚠️ 대주주 요건 해당 가능 종목
-            </div>
+            <div className="text-xs font-bold text-orange-700 mb-1">⚠️ 대주주 요건 해당 가능 종목</div>
             <div className="space-y-1">
               {summary.majorShareholderItems.map((item, idx) => (
                 <div key={idx} className="text-xs text-orange-600">
-                  {item.name} · 보유액 {(item.value / 100_000_000).toFixed(1).replace(/\.0$/, "")}억원 · 매도 시 양도소득세 20~25% 부과
+                  {item.name} · 보유액 {(item.value / 100_000_000).toFixed(1).replace(/\.0$/, "")}억원 · 매도 시 양도소득세 20~25%
                   {item.estimatedTax > 0 && ` · 추정 세액 ${Math.round(item.estimatedTax / 10_000).toLocaleString("ko-KR")}만원`}
                 </div>
               ))}
@@ -200,9 +261,8 @@ export function FinancialIncomeGauge({
         )}
       </div>
 
-      {/* ── 소득 탭: 배당 / 이자 / 양도 ── */}
+      {/* 소득 탭: 배당 / 이자 / 양도 */}
       <div className="border-t border-slate-100">
-        {/* 탭 헤더 */}
         <div className="flex border-b border-slate-100">
           {(["배당", "이자", "양도"] as const).map((tab) => (
             <button
@@ -222,10 +282,9 @@ export function FinancialIncomeGauge({
           ))}
         </div>
 
-        {/* 탭 내용 */}
-        <div className="px-4 py-3 space-y-2 min-h-[80px]">
+        <div className="px-4 py-3 min-h-[80px]">
           {activeTab === "배당" && (
-            <div className="space-y-2">
+            <div className="space-y-0">
               {dividendItems.length > 0 ? dividendItems.map((item, i) => (
                 <IncomeRow key={i} item={item} />
               )) : (
@@ -234,9 +293,9 @@ export function FinancialIncomeGauge({
                 </p>
               )}
 
-              {/* 종합과세 해당 시 표시 */}
+              {/* 종합과세 상세 */}
               {summary?.isOverThreshold && (
-                <div className="border-t border-slate-100 my-2 pt-2 space-y-1">
+                <div className="border-t border-slate-100 mt-2 pt-2 space-y-1">
                   {taxDetailExpanded ? (
                     <>
                       <div className="flex justify-between text-xs text-slate-500">
@@ -271,7 +330,7 @@ export function FinancialIncomeGauge({
                         <span>추가 납부세액</span>
                         <span>{fmtWon(summary.additionalTax)}</span>
                       </div>
-                      <button 
+                      <button
                         type="button"
                         onClick={() => setTaxDetailExpanded(false)}
                         className="w-full text-center text-xs font-semibold text-slate-500 mt-2 py-1 hover:text-slate-700 transition"
@@ -285,7 +344,7 @@ export function FinancialIncomeGauge({
                         <span>추가 납부세액</span>
                         <span>{fmtWon(summary.additionalTax)}</span>
                       </div>
-                      <button 
+                      <button
                         type="button"
                         onClick={() => setTaxDetailExpanded(true)}
                         className="w-full text-center text-xs font-semibold text-slate-500 mt-1 py-1 hover:text-slate-700 transition"
@@ -298,70 +357,63 @@ export function FinancialIncomeGauge({
               )}
             </div>
           )}
+
           {activeTab === "이자" && (
-            interestItems.length > 0 ? interestItems.map((item, i) => (
-              <IncomeRow key={i} item={item} />
-            )) : (
-              <p className="text-xs text-slate-400 text-center py-4">
-                이자소득 내역이 없습니다.
-              </p>
-            )
-          )}
-          {activeTab === "양도" && (
-            <div className="space-y-2">
-              {(summary?.capitalGainsBreakdown ?? []).length > 0 ? (
+            <div className="space-y-0">
+              {interestItems.length > 0 ? (
                 <>
-                  {(summary?.capitalGainsBreakdown ?? []).map((item, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs">
-                      <div className="min-w-0">
-                        <span className="font-bold text-navy truncate">{item.name}</span>
-                        <span className="ml-1.5 text-slate-400">{item.ticker} · 차익 {fmtWon(item.gain)}</span>
-                      </div>
-                      <span className="shrink-0 ml-3 font-semibold text-slate-600">세액 {fmtWon(item.tax)}</span>
-                    </div>
-                  ))}
-                  <div className="border-t border-slate-100 my-2 pt-2">
-                    <p className="text-[10px] text-slate-400 leading-relaxed mb-1.5">
-                      250만원 공제 후 합계 × 22% (금융소득 종합과세와 별도 과세)
-                    </p>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-slate-700 font-bold">최종 양도소득세 총액</span>
-                      <span className="font-bold text-orange-600">{fmtWon(summary?.capitalGainsTax ?? 0)}</span>
+                  {interestItems.map((item, i) => <IncomeRow key={i} item={item} />)}
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <div className="flex justify-between text-xs font-bold text-navy">
+                      <span>이자소득 합계 (세전)</span>
+                      <span>{fmtWon(summary?.interestIncome ?? 0)}</span>
                     </div>
                   </div>
                 </>
               ) : (
                 <p className="text-xs text-slate-400 text-center py-4">
-                  해외주식 등 양도차익 내역이 없습니다.
+                  이자소득 내역이 없습니다. 채권 종목을 입력하면 자동 계산됩니다.
+                </p>
+              )}
+            </div>
+          )}
+
+          {activeTab === "양도" && (
+            <div className="space-y-0">
+              {(summary?.capitalGainsBreakdown ?? []).length > 0 ? (
+                <>
+                  {(summary?.capitalGainsBreakdown ?? []).map((item, i) => (
+                    <CapitalGainsRow key={i} item={item} />
+                  ))}
+                  <div className="border-t border-slate-100 mt-2 pt-2 space-y-1">
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>총 차익 (손익통산)</span>
+                      <span>{fmtWon(summary?.netCapitalGains ?? 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>기본공제</span>
+                      <span>-250만원</span>
+                    </div>
+                    <div className="flex justify-between text-xs font-bold text-orange-600 pt-1 border-t border-slate-50">
+                      <span>최종 양도소득세</span>
+                      <span>{fmtWon(summary?.capitalGainsTax ?? 0)}</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-slate-400 text-center py-4">
+                  해외주식·ETF 양도차익 내역이 없습니다.
                 </p>
               )}
             </div>
           )}
         </div>
       </div>
-
     </div>
   );
 }
 
-// ─────────────────────────────────────────────
-// 내역 행 서브컴포넌트
-// ─────────────────────────────────────────────
-function IncomeRow({ item }: { item: IncomeBreakdownItem }) {
-  return (
-    <div className="flex items-center justify-between text-xs">
-      <div className="min-w-0">
-        <span className="font-bold text-navy truncate">{item.name}</span>
-        <span className="ml-1.5 text-slate-400">{item.ticker} · {fmtPct(item.yieldRate)}</span>
-      </div>
-      <span className="shrink-0 ml-3 font-bold text-samsung">{fmtWon(item.annualIncome)}</span>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-// 금융소득 계산 유틸
-// ─────────────────────────────────────────────
+// ─── AssetForIncomeCalc ────────────────────────────────────────────────────────
 export interface AssetForIncomeCalc {
   name: string;
   ticker?: string;
@@ -373,174 +425,189 @@ export interface AssetForIncomeCalc {
   amount: number;
   amount_type: "quantity" | "value";
   buy_price?: number | null;
-  dividendYield?: number;              // Yahoo Finance: 연간 배당수익률 (소수)
-  trailingAnnualDividendRate?: number; // Yahoo Finance: 주당 연간 배당금
-  interestRate?: number;               // 채권/예금 이자율 (소수)
+  dividendYield?: number;              // 연간 배당수익률 (소수)
+  trailingAnnualDividendRate?: number; // 주당 연간 배당금
+  interestRate?: number;               // 채권 이자율 (소수 — bond_yield/100)
 }
 
+// ─── calcFinancialIncomeSummary ────────────────────────────────────────────────
 export function calcFinancialIncomeSummary(
   assets: AssetForIncomeCalc[],
   tMarginal: number = 0.385
 ): FinancialIncomeSummary {
   const breakdown: IncomeBreakdownItem[] = [];
-  const cgBreakdownTemp: (CapitalGainsBreakdownItem & { _raw?: true })[] = [];
+  const cgBreakdownTemp: CapitalGainsBreakdownItem[] = [];
   const majorShareholderItems: { name: string; ticker: string; value: number; estimatedTax: number }[] = [];
+
   let interestIncome = 0;
   let dividendIncome = 0;
-  let totalCapitalGains = 0;   // 해외 손익통산용
-  let totalCapitalLosses = 0;  // 해외 손익통산용
+  let totalCapitalGains = 0;
+  let totalCapitalLosses = 0;
   let domesticMajorShareholderTax = 0;
   let grossUpTargetDividend = 0;
 
   for (const a of assets) {
-    if (!a.name) continue;
+    const assetClass = (a.asset_class ?? "").trim();
+    const productType = (a.productType ?? "").trim();
 
-    // 보유 평가액
+    // 채권 여부 (통합유형 + 레거시 모두 처리)
+    const isBond =
+      assetClass === "국내채권" || assetClass === "해외채권" ||
+      productType === "국내채권" || productType === "해외채권";
+
+    // 채권은 종목명 입력이 비활성화되어 name=""일 수 있음 → productType으로 대체
+    // 주식·ETF는 name 없으면 스킵
+    if (!a.name && !isBond) continue;
+    const name = a.name || productType || "채권";
+
+    const ticker = a.ticker ?? "";
+    const isKoreanTicker = ticker.endsWith(".KS") || ticker.endsWith(".KQ");
+    const isDomesticListed = isKoreanTicker || a.country === "국내" || a.country === "한국";
+
+    // 보유 평가액 (주식·ETF용)
     const value =
       a.current_value ??
       (a.amount_type === "quantity"
         ? (a.current_price ?? 0) * a.amount
         : a.amount);
 
-    if (value <= 0) continue;
-
-    // 판단 변수
-    const ticker = a.ticker ?? "";
-    const isKoreanTicker = ticker.endsWith(".KS") || ticker.endsWith(".KQ");
-    // 우선순위 1: ticker, 우선순위 2: country
-    const isDomesticListed = isKoreanTicker || a.country === "국내" || a.country === "한국";
-    
-    const assetClass = a.asset_class ?? "";
-    const productType = a.productType ?? "";
-
-    // 매매차익 계산
+    // 매매차익 (주식·ETF용)
     let gain = 0;
-    if (a.buy_price && a.current_price && a.amount_type === "quantity") {
+    if (!isBond && a.buy_price && a.current_price && a.amount_type === "quantity") {
       gain = (a.current_price - a.buy_price) * a.amount;
     }
 
-    // ── 이자 / 배당 소득 ──
-    if (assetClass === "국내채권" || assetClass === "해외채권") {
-      // 채권/예금은 이자소득
-      const rate = a.interestRate ?? a.dividendYield ?? 0;
-      const annual = value * rate;
-      if (annual > 0) {
-        interestIncome += annual;
+    // ── 채권: 이자소득 ──────────────────────────────────────────────────────────
+    if (isBond) {
+      // 액면금액(원금) = 매수단가 × 수량
+      const principal =
+        a.amount_type === "quantity"
+          ? (a.buy_price ?? 0) * a.amount
+          : (a.buy_price ?? 0); // value 기준 입력 시
+      const rate = a.interestRate ?? 0; // 이미 소수 (bond_yield / 100)
+
+      // 이자 지급 일수 = 365 (연간 기준)
+      const annualGross = principal * rate * (365 / 365);
+      if (annualGross > 0 && principal > 0) {
+        const annualNet = Math.round(annualGross * (1 - INTEREST_WITHHOLDING));
+        interestIncome += annualGross;
         breakdown.push({
-          name: a.name,
+          name,  // a.name || productType || "채권"
           ticker,
           incomeType: "이자",
-          annualIncome: Math.round(annual),
+          annualIncome: Math.round(annualGross),
+          netIncome: annualNet,
           yieldRate: rate,
-          value: Math.round(value),
+          value: value > 0 ? Math.round(value) : Math.round(principal),
+          principal: Math.round(principal),
+          withholdingRate: INTEREST_WITHHOLDING,
         });
       }
-    } else if (productType === "리츠") {
-      // 리츠는 명시적 배당소득 — Yahoo Finance dividendYield 직접 사용
-      const yieldRate = a.dividendYield ?? 0;
+      continue; // 채권은 양도소득 계산 생략
+    }
 
-      const annual = value * yieldRate;
-      if (annual > 0) {
-        dividendIncome += annual;
-        breakdown.push({
-          name: gain > 0 ? a.name + " (배당금)" : a.name,
-          ticker,
-          incomeType: "배당(집합투자)",
-          annualIncome: Math.round(annual),
-          yieldRate,
-          value: Math.round(value),
-        });
-      }
-    } else {
-      // 기타 배당소득 — Yahoo Finance dividendYield 직접 사용, 0이면 제외
+    // ── 리츠 / 주식 / ETF: 배당소득 ────────────────────────────────────────────
+    if (value > 0) {
       const yieldRate = a.dividendYield ?? 0;
 
       if (yieldRate > 0) {
-        const annual = value * yieldRate;
-        dividendIncome += annual;
-        
-        let currentIncomeType: IncomeBreakdownItem["incomeType"] = "배당";
-        if (isKoreanTicker && productType === "주식형") {
-          currentIncomeType = "배당(국내직접)";
-          grossUpTargetDividend += annual; // Gross-up 대상
-        } else if (!isKoreanTicker && productType === "주식형") {
-          currentIncomeType = "배당(해외직접)";
-        } else if (productType === "ETF" || productType === "펀드" || productType === "채권형") {
-          currentIncomeType = "배당(집합투자)";
+        const annualGross = value * yieldRate;
+        const withholdingRate = isDomesticListed ? DOMESTIC_DIV_WITHHOLDING : FOREIGN_DIV_WITHHOLDING;
+        const annualNet = Math.round(annualGross * (1 - withholdingRate));
+        dividendIncome += annualGross;
+
+        // 소득유형 분류
+        let incomeType: IncomeBreakdownItem["incomeType"] = "배당";
+        if (isDomesticListed && productType === "국내주식") {
+          incomeType = "배당(국내직접)";
+          grossUpTargetDividend += annualGross; // Gross-up (11%) 대상
+        } else if (!isDomesticListed && productType === "해외주식") {
+          incomeType = "배당(해외직접)";
+        } else if (
+          productType === "국내ETF" || productType === "해외ETF" ||
+          productType === "ETF" || productType === "펀드" ||
+          productType === "채권형" || productType === "리츠" ||
+          productType === "집합투자"
+        ) {
+          incomeType = "배당(집합투자)";
         }
 
         breakdown.push({
-          name: gain > 0 ? a.name + " (배당금)" : a.name,
+          name,  // a.name || productType || "채권" (fallback 적용)
           ticker,
-          incomeType: currentIncomeType,
-          annualIncome: Math.round(annual),
+          incomeType,
+          annualIncome: Math.round(annualGross),
+          netIncome: annualNet,
           yieldRate,
           value: Math.round(value),
+          withholdingRate,
         });
       }
     }
 
-    // ── 매매차익(gain) 과세 분류 ──
+    // ── 양도소득 ────────────────────────────────────────────────────────────────
     if (gain !== 0) {
-
-      // ① 해외주식 · 해외ETF · 해외펀드: 손익통산 후 250만원 공제, 22%
+      // ① 해외주식·해외ETF·해외펀드: 손익통산 후 250만원 공제, 22%
       const isForeignTaxable =
-        !isDomesticListed &&
-        (productType === "주식형" || productType === "ETF" || productType === "개별주식" ||
-         productType === "채권형" || productType === "펀드") ||
-        assetClass === "해외채권";
+        !isDomesticListed && (
+          productType === "해외주식" ||
+          productType === "해외ETF" ||
+          productType === "주식형" ||    // 레거시
+          productType === "ETF" ||       // 레거시
+          productType === "개별주식" ||  // 레거시
+          productType === "채권형" ||    // 레거시
+          productType === "펀드"         // 레거시
+        );
 
       if (isForeignTaxable) {
         const cat: CapitalGainsBreakdownItem["category"] =
-          productType === "ETF" ? "해외주식" :
-          productType === "채권형" || productType === "펀드" || assetClass === "해외채권"
-            ? "해외펀드" : "해외주식";
+          productType === "해외ETF" || productType === "ETF" ? "해외주식" :
+          productType === "펀드" || productType === "채권형" ? "해외펀드" : "해외주식";
         if (gain > 0) totalCapitalGains += gain;
         else totalCapitalLosses += gain;
         cgBreakdownTemp.push({ name: a.name, ticker, gain, tax: 0, category: cat });
 
-      // ② 국내 대주주 상장주식: 지분율 1% 이상(ticker 불명) 또는 종목당 10억 이상
-      } else if (isKoreanTicker && value >= 1_000_000_000 && gain !== 0) {
+      // ② 국내 대주주 (보유액 10억 이상 국내주식)
+      } else if (isDomesticListed && value >= 1_000_000_000 && productType === "국내주식") {
         const tax = gain <= 0 ? 0
           : gain <= 300_000_000
             ? gain * 0.20
             : 300_000_000 * 0.20 + (gain - 300_000_000) * 0.25;
-        domesticMajorShareholderTax += tax;
-        cgBreakdownTemp.push({ name: a.name, ticker, gain, tax: Math.round(tax), category: "국내대주주" });
-        majorShareholderItems.push({ name: a.name, ticker, value, estimatedTax: Math.round(tax) });
+        if (tax > 0) {
+          domesticMajorShareholderTax += tax;
+          cgBreakdownTemp.push({ name: a.name, ticker, gain, tax: Math.round(tax), category: "국내대주주" });
+          majorShareholderItems.push({ name: a.name, ticker, value, estimatedTax: Math.round(tax) });
+        }
 
-      // ③ 국내상장 해외ETF · 금ETF: 매매차익 → 배당소득(집합투자)으로 과세
-      } else if (isDomesticListed && gain > 0 &&
-                 (assetClass === "해외주식" || assetClass === "금" || productType === "금")) {
+      // ③ 국내상장 해외ETF (자산 = 해외) 매매차익 → 배당소득(집합투자)
+      } else if (isDomesticListed && gain > 0 && assetClass === "해외주식") {
         dividendIncome += gain;
         breakdown.push({
           name: a.name + " (매매차익)",
           ticker,
           incomeType: "배당(집합투자)",
           annualIncome: Math.round(gain),
-          yieldRate: a.buy_price && a.amount ? gain / (a.buy_price * a.amount) : 0,
+          netIncome: Math.round(gain * (1 - DOMESTIC_DIV_WITHHOLDING)),
+          yieldRate: (a.buy_price && a.amount) ? gain / (a.buy_price * a.amount) : 0,
           value: Math.round(value),
+          withholdingRate: DOMESTIC_DIV_WITHHOLDING,
         });
       }
-      // ④ 국내주식형 ETF · 국내채권 매매차익: 비과세 (생략)
+      // ④ 국내주식형 ETF·국내채권 매매차익: 비과세 (생략)
     }
   }
 
-  // ── ① 해외주식·ETF·펀드: 손익통산 후 250만원 공제, 22% ──
+  // ── 해외 손익통산 및 양도소득세 ──────────────────────────────────────────────
   const netCapitalGains = totalCapitalGains + totalCapitalLosses;
   const foreignCapitalGainsTax = netCapitalGains > 2_500_000
     ? Math.round((netCapitalGains - 2_500_000) * 0.22)
     : 0;
 
-  // ── ② 합계 ──
   const capitalGainsTax = foreignCapitalGainsTax + Math.round(domesticMajorShareholderTax);
 
-  // ── 항목별 기여 세액 분배 ──
+  // 항목별 기여 세액 배분
   const capitalGainsBreakdown: CapitalGainsBreakdownItem[] = cgBreakdownTemp.map((item) => {
-    if (item.category === "국내대주주") {
-      return { ...item, gain: Math.round(item.gain) };
-    }
-    // 해외주식 / 해외펀드: 손익통산 기여 비율로 분배
+    if (item.category === "국내대주주") return { ...item, gain: Math.round(item.gain) };
     let tax = 0;
     if (foreignCapitalGainsTax > 0 && totalCapitalGains > 0 && item.gain > 0) {
       tax = foreignCapitalGainsTax * (item.gain / totalCapitalGains);
@@ -548,7 +615,8 @@ export function calcFinancialIncomeSummary(
     return { ...item, gain: Math.round(item.gain), tax: Math.round(tax) };
   }).sort((a, b) => b.gain - a.gain);
 
-  const totalFinancialIncome = interestIncome + dividendIncome;
+  // ── 금융소득 종합과세 계산 (gross 기준) ─────────────────────────────────────
+  const totalFinancialIncome = interestIncome + dividendIncome; // gross (세전)
 
   const grossUpAmount = grossUpTargetDividend * 0.11;
   const taxableFinancialIncome = totalFinancialIncome + grossUpAmount;
@@ -556,11 +624,13 @@ export function calcFinancialIncomeSummary(
   let comparisonTax = 0;
   let finalTax = 0;
   let dividendTaxCredit = 0;
-  let withholdingTax = totalFinancialIncome * 0.154;
+  const withholdingTax = totalFinancialIncome * 0.154;
   let additionalTax = 0;
 
   if (totalFinancialIncome > THRESHOLD) {
+    // 일반산출세액: 2,000만원 초과분에 한계세율, 이하에 14%
     generalTax = (taxableFinancialIncome - THRESHOLD) * tMarginal + THRESHOLD * 0.14;
+    // 비교산출세액: 전액 14%
     comparisonTax = taxableFinancialIncome * 0.14;
     finalTax = Math.max(generalTax, comparisonTax);
     dividendTaxCredit = Math.min(grossUpAmount, finalTax * 0.1);
@@ -595,22 +665,17 @@ export function calcFinancialIncomeSummary(
   };
 }
 
-/**
- * proxy-finance API 응답에서 배당 데이터 추출
- */
+/** proxy-finance API 응답에서 배당 데이터 추출 */
 export function extractDividendFromYahoo(yahooJson: Record<string, unknown>): {
   dividendYield?: number;
   trailingAnnualDividendRate?: number;
 } {
-  // 1. root (proxy-finance 에서 추가한 값)
   let dy = yahooJson?.dividendYield;
   let tadr = yahooJson?.trailingAnnualDividendRate;
 
-  // 2. chart.result[0].meta fallback
   if (typeof dy !== "number" || typeof tadr !== "number") {
     const results = (yahooJson?.chart as Record<string, unknown>)?.result as Record<string, unknown>[] | undefined;
     const m = (results?.[0]?.meta ?? {}) as Record<string, unknown>;
-    
     if (typeof dy !== "number") dy = m?.dividendYield;
     if (typeof tadr !== "number") tadr = m?.trailingAnnualDividendRate;
   }
