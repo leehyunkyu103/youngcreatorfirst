@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Activity, BarChart2, FolderOpen, GitBranch, RefreshCcw } from "lucide-react";
 import ExistingPortfolioTab from "../tab1/ExistingPortfolioTab";
 import {
@@ -26,8 +26,6 @@ const innerTabs: { id: InnerTab; label: string; icon: React.ReactNode }[] = [
   { id: "rebalancing", label: "리밸런싱(매도/유지)", icon: <RefreshCcw size={15} /> },
 ];
 
-const STORAGE_KEY = "samsung-vvip-tab2-inner-tab";
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Tab2Page() {
@@ -40,16 +38,8 @@ export default function Tab2Page() {
     confirmRebalancingSell,
   } = useCustomerContext();
 
-  useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "holding" || stored === "risk" || stored === "technical" || stored === "options" || stored === "rebalancing") {
-      setActiveInnerTab(stored);
-    }
-  }, []);
-
   const selectInnerTab = (tab: InnerTab) => {
     setActiveInnerTab(tab);
-    window.localStorage.setItem(STORAGE_KEY, tab);
   };
 
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ScatterChart, Globe, RefreshCcw } from "lucide-react";
 import CorrelationGlobalTab from "./CorrelationGlobalTab";
 import CorrelationDomesticTab from "./CorrelationDomesticTab";
@@ -18,8 +18,6 @@ const innerTabs: { id: InnerTab; label: string; icon: React.ReactNode }[] = [
   { id: "rebalancing",          label: "리밸런싱(매수)",       icon: <RefreshCcw size={15} /> },
 ];
 
-const STORAGE_KEY = "samsung-vvip-tab3-inner-tab";
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Tab3Page() {
@@ -34,16 +32,8 @@ export default function Tab3Page() {
     setNewPortfolioAnalysisResult,
   } = useCustomerContext();
 
-  useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === "correlation-domestic" || stored === "correlation-global" || stored === "rebalancing") {
-      setActiveInnerTab(stored);
-    }
-  }, []);
-
   const selectInnerTab = (tab: InnerTab) => {
     setActiveInnerTab(tab);
-    window.localStorage.setItem(STORAGE_KEY, tab);
   };
 
   // 탭 2-1과 동일한 한계세율 추정 로직

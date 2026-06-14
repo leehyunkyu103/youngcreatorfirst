@@ -265,8 +265,8 @@ export default function StressChart() {
   const divScore = +(1 - avgCorr).toFixed(2);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f1f5f9", padding: "32px 24px", fontFamily: "sans-serif" }}>
-      <div style={{ maxWidth: 960, margin: "0 auto" }}>
+    <div>
+      <div>
         <h1 style={{ color: NAVY, fontSize: 22, fontWeight: 700, marginBottom: 24 }}>스트레스 테스트</h1>
 
         {/* 페르소나 선택 */}
@@ -303,15 +303,24 @@ export default function StressChart() {
           <>
             <div style={{ background: "#fff", borderRadius: 12, padding: 28, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", border: "1px solid #e5e7eb", marginBottom: 20 }}>
               <p style={{ color: NAVY, fontWeight: 600, fontSize: 14, marginBottom: 20 }}>시나리오별 예상 손실률 (%)</p>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <ResponsiveContainer width="100%" height={360}>
+                <BarChart
+                  data={chartData}
+                  margin={{ top: 16, right: 20, left: 0, bottom: 16 }}
+                  barCategoryGap="22%"
+                  barGap={6}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 12 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                  <YAxis
+                    tickFormatter={(v: number) => `${v}%`}
+                    tick={{ fontSize: 12 }}
+                    width={58}
+                  />
                   <Tooltip formatter={(v) => `${v}%`} />
                   <Legend />
-                  <Bar dataKey="기존포트폴리오" fill={NAVY} name="기존 포트폴리오" />
-                  <Bar dataKey="신규포트폴리오" fill={GOLD} name="신규 포트폴리오" />
+                  <Bar dataKey="기존포트폴리오" fill={NAVY} name="기존 포트폴리오" maxBarSize={110} />
+                  <Bar dataKey="신규포트폴리오" fill={GOLD} name="신규 포트폴리오" maxBarSize={110} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

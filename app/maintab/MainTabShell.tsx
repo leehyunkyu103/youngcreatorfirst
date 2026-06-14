@@ -1,6 +1,6 @@
 "use client";
 
-import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSelectedLayoutSegment } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import {
@@ -31,6 +31,13 @@ const tabPaths: Record<string, string> = {
 
 export default function MainTabShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+
+  // 메인 탭 전환 시 서브 탭 기본값 보장: localStorage 잔류값 선제 제거
+  const currentSegment = useSelectedLayoutSegment();
+  useEffect(() => {
+    if (currentSegment === "tab2") window.localStorage.removeItem("samsung-vvip-tab2-inner-tab");
+    if (currentSegment === "tab3") window.localStorage.removeItem("samsung-vvip-tab3-inner-tab");
+  }, [currentSegment]);
 
   const [customerProfiles, setCustomerProfiles] = useState<CustomerProfile[]>(defaultCustomerProfiles);
   const [customerData, setCustomerData] = useState<Record<CustomerId, AppState>>(() => createInitialCustomerData(defaultCustomerProfiles));
@@ -65,6 +72,13 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
   const [rebalancingBuyMap, setRebalancingBuyMap] = useState<Record<CustomerId, PortfolioAsset[]>>({});
   const [newPortfolioAnalysisResultMap, setNewPortfolioAnalysisResultMap] = useState<Record<CustomerId, PortfolioAnalysisResult | null>>({});
 
+  // ── 원자적 읽기용 Ref — async 콜백 / 비동기 파이프라인에서 stale closure 없이 최신 상태 참조
+  // React 상태 업데이트는 배치 처리되어 다음 렌더까지 pending 상태이므로,
+  // 매 렌더에서 .current를 동기 갱신하면 항상 최신 커밋 값을 보장한다.
+  const portfolioAssetsMapRef = useRef<Record<CustomerId, PortfolioAsset[]>>({});
+  const rebalancingSellMapRef = useRef<Record<CustomerId, PortfolioAsset[]>>({});
+  const selectedCustomerRef = useRef<CustomerId>(selectedCustomer);
+
   // 파생값 — 공개 인터페이스는 Tab 1의 formData/riskResult 패턴과 동일
   const portfolioAssets = portfolioAssetsMap[selectedCustomer] ?? [];
   const isPortfolioLoaded = portfolioLoadedMap[selectedCustomer] ?? false;
@@ -72,6 +86,12 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
   const rebalancingSellAssets = rebalancingSellMap[selectedCustomer] ?? [];
   const rebalancingBuyAssets = rebalancingBuyMap[selectedCustomer] ?? [];
   const newPortfolioAnalysisResult = newPortfolioAnalysisResultMap[selectedCustomer] ?? null;
+
+  // Ref 동기화 — 렌더마다 최신 커밋 값 기록 (useEffect 없이 동기 할당)
+  // 이를 통해 async 콜백이 stale 클로저 없이 항상 최신 상태를 읽을 수 있다
+  portfolioAssetsMapRef.current = portfolioAssetsMap;
+  rebalancingSellMapRef.current = rebalancingSellMap;
+  selectedCustomerRef.current = selectedCustomer;
 
   const selectedCustomerProfile = customerProfiles.find((c) => c.id === selectedCustomer) ?? customerProfiles[0];
 
@@ -185,24 +205,44 @@ export default function MainTabShell({ children }: { children: React.ReactNode }
     setAnalysisResultMap(prev => ({ ...prev, [selectedCustomer]: result }));
   };
 
-  // ── 리밸런싱 파이프라인 액션 — 단방향, 역오염 차단 ──────────────────────
-  const pushToRebalancingSell = () => {
-    const deepCopy = portfolioAssets.map(a => ({ ...a }));
-    setRebalancingSellMap(prev => ({ ...prev, [selectedCustomer]: deepCopy }));
-  };
-  const setRebalancingSellAssets = (assets: PortfolioAsset[]) => {
-    setRebalancingSellMap(prev => ({ ...prev, [selectedCustomer]: assets }));
-  };
-  const confirmRebalancingSell = () => {
-    const deepCopy = (rebalancingSellMap[selectedCustomer] ?? []).map(a => ({ ...a }));
-    setRebalancingBuyMap(prev => ({ ...prev, [selectedCustomer]: deepCopy }));
-  };
-  const setRebalancingBuyAssets = (assets: PortfolioAsset[]) => {
-    setRebalancingBuyMap(prev => ({ ...prev, [selectedCustomer]: assets }));
-  };
-  const setNewPortfolioAnalysisResult = (result: PortfolioAnalysisResult | null) => {
-    setNewPortfolioAnalysisResultMap(prev => ({ ...prev, [selectedCustomer]: result }));
-  };
+  // ── 리밸런싱 파이프라인 액션 ─────────────────────────────────────────────
+  //
+  // [레이스 컨디션 해결 전략]
+  // 1. useCallback(fn, []) — stable identity: 매 렌더에서 새 함수가 생성되지 않으므로
+  //    하위 컴포넌트가 stale 클로저를 캡처하는 타이밍 버그 원천 차단.
+  // 2. Ref 읽기 — setterFn 내부에서 selectedCustomer / 자산 맵을 Ref로 읽으므로
+  //    "분석 실행 async 대기 중 사용자가 자산을 편집 → pushToRebalancingSell이 편집 전
+  //    스냅샷을 복사" 하는 stale closure 버그 제거.
+  // 3. 함수형 setter(prev => ...) — React가 최신 prev 상태를 보장하므로
+  //    연속 호출 시에도 덮어쓰기 없이 순서가 보장됨.
+  //
+  const pushToRebalancingSell = useCallback(() => {
+    const cid = selectedCustomerRef.current;
+    const snap = (portfolioAssetsMapRef.current[cid] ?? []).map(a => ({ ...a }));
+    setRebalancingSellMap(prev => ({ ...prev, [cid]: snap }));
+  }, []); // stable — Ref 기반, 의존성 없음
+
+  const setRebalancingSellAssets = useCallback((assets: PortfolioAsset[]) => {
+    const cid = selectedCustomerRef.current;
+    setRebalancingSellMap(prev => ({ ...prev, [cid]: assets }));
+  }, []); // stable
+
+  const confirmRebalancingSell = useCallback(() => {
+    const cid = selectedCustomerRef.current;
+    // rebalancingSellMapRef.current: 마지막 렌더에서 커밋된 최신 값
+    // → 버튼 클릭 직전의 편집 내용이 이미 반영되어 있음이 보장됨
+    const snap = (rebalancingSellMapRef.current[cid] ?? []).map(a => ({ ...a }));
+    setRebalancingBuyMap(prev => ({ ...prev, [cid]: snap }));
+  }, []); // stable — Ref 기반, 의존성 없음
+  const setRebalancingBuyAssets = useCallback((assets: PortfolioAsset[]) => {
+    const cid = selectedCustomerRef.current;
+    setRebalancingBuyMap(prev => ({ ...prev, [cid]: assets }));
+  }, []); // stable
+
+  const setNewPortfolioAnalysisResult = useCallback((result: PortfolioAnalysisResult | null) => {
+    const cid = selectedCustomerRef.current;
+    setNewPortfolioAnalysisResultMap(prev => ({ ...prev, [cid]: result }));
+  }, []); // stable
 
   const riskResult = useMemo(() => calculateRiskResult(formData.rrttllu), [formData.rrttllu]);
 
