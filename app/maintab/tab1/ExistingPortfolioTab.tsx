@@ -8,6 +8,7 @@ import {
   saveAnalysisResult,
 } from "../CustomerContext";
 import type { PortfolioAsset } from "../CustomerContext";
+import { getUSDKRWRate } from "@/utils/fxCache";
 import {
   calcFinancialIncomeSummary,
   FINANCIAL_INCOME_STORAGE_KEY,
@@ -73,6 +74,15 @@ function fmtNum(v: number | null | undefined): string {
 function fmtDec(v: number | null | undefined): string {
   if (v == null) return "";
   return v.toLocaleString("ko-KR", { maximumFractionDigits: 4 });
+}
+function fmtPrice(v: number): string {
+  return v.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+}
+function effectivePriceOf(a: PortfolioAsset): number {
+  const cp = Number(a.current_price);
+  if (Number.isFinite(cp) && cp > 0) return cp;
+  const bp = Number(a.buy_price);
+  return Number.isFinite(bp) && bp > 0 ? bp : 0;
 }
 
 function deriveAssetClass(unifiedType: string): string {
@@ -275,7 +285,21 @@ export default function ExistingPortfolioTab() {
           ? toUnifiedProductType(geminiAssetClass, geminiProductType)
           : undefined;
 
-        // 배당 데이터 추출
+        const rawPrice: number | null =
+          data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null;
+        const isBondAsset = BOND_TYPES.has(unifiedType ?? "");
+
+        let currentPriceKRW: number | null = null;
+        if (typeof rawPrice === "number" && rawPrice > 0 && !isBondAsset) {
+          const isForeign = !ticker.endsWith(".KS") && !ticker.endsWith(".KQ");
+          if (isForeign) {
+            const rate = await getUSDKRWRate();
+            if (rate) currentPriceKRW = Math.round(rawPrice * rate);
+          } else {
+            currentPriceKRW = Math.round(rawPrice);
+          }
+        }
+
         const dividendYield =
           typeof data.dividendYield === "number" && data.dividendYield > 0
             ? data.dividendYield : undefined;
@@ -291,16 +315,19 @@ export default function ExistingPortfolioTab() {
             country:     deriveCountry(unifiedType),
           } : {}),
           ...(!unifiedType && data.country ? { country: data.country as string } : {}),
+          ...(currentPriceKRW !== null ? { current_price: currentPriceKRW } : {}),
           is_hedged: false,
-          // dividendYield는 PortfolioAsset에 없지만 런타임에 저장됨 (portfolioLogic에서 읽음)
           ...(dividendYield != null ? { dividendYield } : {}),
           ...(trailingAnnualDividendRate != null ? { trailingAnnualDividendRate } : {}),
         } as Partial<PortfolioAsset>);
 
+        const priceStr = currentPriceKRW !== null
+          ? ` / 현재가 ${currentPriceKRW.toLocaleString("ko-KR")}원`
+          : "";
         const yieldMsg = dividendYield != null
           ? ` · 배당수익률 ${(dividendYield * 100).toFixed(2)}%`
           : "";
-        showToast(`'${name}' → ${ticker}${yieldMsg} 자동 완성`);
+        showToast(`'${name}' → ${ticker} 자동 완성${priceStr}${yieldMsg}`);
       } catch (err) {
         console.warn("[SmartInference] API 오류:", err);
         showToast("네트워크 오류가 발생했습니다. 수동으로 입력해주세요.");
@@ -380,9 +407,10 @@ export default function ExistingPortfolioTab() {
                     "종목명",
                     "티커",
                     "상품유형",
-                    "투자국가",
                     "수량(주/개)",
                     "매수단가(원화)",
+                    "현재가",
+                    "비중(%)",
                     "채권수익률(%)",
                     "만기(년)",
                     "",
@@ -397,20 +425,30 @@ export default function ExistingPortfolioTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {portfolioAssets.map((a, i) => (
-                  <AssetRow
-                    key={i}
-                    idx={i}
-                    asset={a}
-                    isInferring={inferringIdx === i}
-                    editingTicker={editingTickerIdx === i}
-                    onUpdate={updateRow}
-                    onRemove={removeRow}
-                    onInfer={handleSmartInference}
-                    onStartEditTicker={() => setEditingTickerIdx(i)}
-                    onEndEditTicker={() => setEditingTickerIdx(null)}
-                  />
-                ))}
+                {(() => {
+                  const totalValue = portfolioAssets.reduce(
+                    (sum, a) => sum + a.amount * effectivePriceOf(a), 0
+                  );
+                  return portfolioAssets.map((a, i) => {
+                    const assetValue = a.amount * effectivePriceOf(a);
+                    const weight = totalValue > 0 ? (assetValue / totalValue) * 100 : 0;
+                    return (
+                      <AssetRow
+                        key={i}
+                        idx={i}
+                        asset={a}
+                        weight={weight}
+                        isInferring={inferringIdx === i}
+                        editingTicker={editingTickerIdx === i}
+                        onUpdate={updateRow}
+                        onRemove={removeRow}
+                        onInfer={handleSmartInference}
+                        onStartEditTicker={() => setEditingTickerIdx(i)}
+                        onEndEditTicker={() => setEditingTickerIdx(null)}
+                      />
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>
@@ -441,6 +479,7 @@ export default function ExistingPortfolioTab() {
 interface AssetRowProps {
   idx: number;
   asset: PortfolioAsset;
+  weight: number;
   isInferring: boolean;
   editingTicker: boolean;
   onUpdate: (i: number, patch: Partial<PortfolioAsset>) => void;
@@ -451,10 +490,19 @@ interface AssetRowProps {
 }
 
 function AssetRow({
-  idx, asset: a, isInferring, editingTicker,
+  idx, asset: a, weight,
+  isInferring, editingTicker,
   onUpdate, onRemove, onInfer, onStartEditTicker, onEndEditTicker,
 }: AssetRowProps) {
   const isBond = BOND_TYPES.has(a.productType ?? "");
+
+  // 채권수익률 로컬 문자열 상태 — "3." 같은 중간 입력값 보존
+  const [bondYieldRaw, setBondYieldRaw] = useState<string>(
+    a.bond_yield != null ? String(a.bond_yield) : ""
+  );
+  useEffect(() => {
+    setBondYieldRaw(a.bond_yield != null ? String(a.bond_yield) : "");
+  }, [a.bond_yield]);
 
   const handleProductTypeChange = (val: string) => {
     onUpdate(idx, {
@@ -542,26 +590,22 @@ function AssetRow({
         </select>
       </td>
 
-      {/* 투자국가 */}
-      <td className="px-3 py-2">
-        <select
-          className="h-9 rounded border border-slate-200 px-2 text-xs text-navy"
-          value={a.country}
-          onChange={(e) => onUpdate(idx, { country: e.target.value })}
-        >
-          {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </td>
-
-      {/* 수량(주/개) */}
+      {/* 수량(주/개) — 채권 유형일 때 잠금 */}
       <td className="px-3 py-2">
         <input
           type="text"
           inputMode="numeric"
-          className="h-9 w-24 rounded border border-slate-200 px-2 text-xs text-navy"
-          placeholder="수량"
-          value={fmtNum(a.amount)}
+          className={[
+            "h-9 w-24 rounded border px-2 text-xs",
+            isBond
+              ? "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400"
+              : "border-slate-200 text-navy",
+          ].join(" ")}
+          placeholder={isBond ? "—" : "수량"}
+          value={isBond ? "" : fmtNum(a.amount)}
+          disabled={isBond}
           onChange={(e) => {
+            if (isBond) return;
             const raw = e.target.value.replace(/,/g, "");
             onUpdate(idx, { amount: raw ? Number(raw) : 0, amount_type: "quantity" });
           }}
@@ -583,7 +627,28 @@ function AssetRow({
         />
       </td>
 
-      {/* 채권수익률(%) */}
+      {/* 현재가 — current_price 우선, 없으면 buy_price 폴백 */}
+      <td className="px-3 py-2">
+        <div className="flex h-9 min-w-[80px] items-center rounded bg-slate-50 px-2 text-xs text-slate-600 select-none">
+          {(() => {
+            const ep = effectivePriceOf(a);
+            return ep > 0
+              ? fmtPrice(ep)
+              : <span className="text-slate-300">—</span>;
+          })()}
+        </div>
+      </td>
+
+      {/* 비중(%) — 전체 자산 평가금액 대비 실시간 연산 */}
+      <td className="px-3 py-2">
+        <div className="flex h-9 min-w-[52px] items-center justify-end rounded bg-slate-50 px-2 text-xs font-semibold text-navy select-none">
+          {weight > 0
+            ? `${weight.toFixed(1)}%`
+            : <span className="font-normal text-slate-300">—</span>}
+        </div>
+      </td>
+
+      {/* 채권 수익률(%) — 채권 유형일 때만 활성화, 소수점 타이핑 맥락 보존 */}
       <td className="px-3 py-2">
         <input
           type="text"
@@ -595,11 +660,15 @@ function AssetRow({
               : "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400",
           ].join(" ")}
           placeholder={isBond ? "예: 3.5" : "—"}
-          value={isBond ? fmtDec(a.bond_yield) : ""}
+          value={isBond ? bondYieldRaw : ""}
           disabled={!isBond}
           onChange={(e) => {
-            const raw = e.target.value.replace(/,/g, "");
-            onUpdate(idx, { bond_yield: raw ? parseFloat(raw) : null });
+            let raw = e.target.value.replace(/[^0-9.]/g, "");
+            const dotIdx = raw.indexOf(".");
+            if (dotIdx !== -1) raw = raw.slice(0, dotIdx + 1) + raw.slice(dotIdx + 1).replace(/\./g, "");
+            setBondYieldRaw(raw);
+            const num = parseFloat(raw);
+            onUpdate(idx, { bond_yield: raw && !isNaN(num) ? num : null });
           }}
         />
       </td>

@@ -180,56 +180,67 @@ export function HoldingPerformanceTable({ assets }: { assets: PortfolioAsset[] }
   if (!rows.length) return null;
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200">
-      <table className="w-full text-sm">
+      {/* table-fixed: 열 너비를 th 기준으로 고정 → 셀 내용 길이에 따른 열 가변 차단 */}
+      <table className="w-full table-fixed text-sm">
         <thead className="border-b border-slate-200 bg-slate-50">
           <tr>
-            {["종목명", "자산군", "현재가", "매수단가", "평가금액", "수익률", "평가손익"].map((h) => (
-              <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 whitespace-nowrap">{h}</th>
-            ))}
+            <th className="w-[22%] px-3    py-2.5 text-left   text-xs font-bold text-slate-500 whitespace-nowrap">종목명</th>
+            <th className="w-[12%] px-2    py-2.5 text-center text-xs font-bold text-slate-500 whitespace-nowrap">자산군</th>
+            <th className="w-[14%] pl-2 pr-4 py-2.5 text-right text-xs font-bold text-slate-500 whitespace-nowrap">현재가</th>
+            <th className="w-[14%] pl-2 pr-4 py-2.5 text-right text-xs font-bold text-slate-500 whitespace-nowrap">매수단가</th>
+            <th className="w-[15%] pl-2 pr-4 py-2.5 text-right text-xs font-bold text-slate-500 whitespace-nowrap">평가금액</th>
+            <th className="w-[10%] pl-2 pr-4 py-2.5 text-right text-xs font-bold text-slate-500 whitespace-nowrap">수익률</th>
+            <th className="w-[13%] pl-2 pr-4 py-2.5 text-right text-xs font-bold text-slate-500 whitespace-nowrap">평가손익</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {rows.map((a, i) => {
-            const cp: number | null = typeof a.current_price === "number" && a.current_price > 0 ? a.current_price : null;
-            const bp: number | null = typeof a.buy_price === "number" && a.buy_price > 0 ? a.buy_price : null;
+            // Number() 변환으로 JSON/Supabase에서 문자열로 역직렬화된 경우도 처리
+            const cpRaw = Number(a.current_price);
+            const cp: number | null = Number.isFinite(cpRaw) && cpRaw > 0 ? cpRaw : null;
+            const bpRaw = Number(a.buy_price);
+            const bp: number | null = Number.isFinite(bpRaw) && bpRaw > 0 ? bpRaw : null;
             const qty = a.amount;
             const totalCost: number | null = a.amount_type === "value" ? qty : bp !== null ? qty * bp : null;
             const totalCurrentValue: number | null = cp === null ? null : a.amount_type === "quantity" ? qty * cp : bp !== null ? (qty / bp) * cp : null;
+            // 현재가 없을 때 매수 원가(bp × qty)를 평가금액 폴백으로 사용 → 열이 빈 것처럼 보이는 문제 해소
+            const costBasis: number | null = a.amount_type === "quantity" && bp !== null && qty > 0 ? qty * bp : null;
             const displayValue: number | null = totalCurrentValue !== null
               ? totalCurrentValue
               : a.amount_type === "value"
                 ? (typeof a.current_value === "number" ? a.current_value : typeof a.amount === "number" ? a.amount : null)
-                : null;
+                : costBasis;
             const gainPct: number | null = cp !== null && bp !== null ? ((cp - bp) / bp) * 100 : null;
             const gainAmt: number | null = totalCurrentValue !== null && totalCost !== null ? totalCurrentValue - totalCost : null;
             const isPos = gainAmt !== null && gainAmt > 0;
             const isNeg = gainAmt !== null && gainAmt < 0;
             return (
               <tr key={i} className="bg-white hover:bg-slate-50">
-                <td className="px-3 py-2.5 font-semibold text-navy whitespace-nowrap">{a.name}</td>
-                <td className="px-3 py-2.5">
+                {/* 종목명: table-fixed 환경에서 넘침 방지 — truncate(overflow-hidden + ellipsis + nowrap) */}
+                <td className="px-3 py-2.5 text-left font-semibold text-navy max-w-0 truncate">{a.name}</td>
+                <td className="px-2 py-2.5 text-center">
                   <span className="rounded-full px-2 py-0.5 text-xs font-bold"
                     style={{ backgroundColor: (CLASS_COLORS[a.asset_class] ?? "#94a3b8") + "22", color: CLASS_COLORS[a.asset_class] ?? "#64748b" }}>
                     {a.asset_class}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-right text-xs font-semibold text-slate-700">
+                <td className="pl-2 pr-4 py-2.5 text-right text-xs font-semibold text-slate-700">
                   {cp !== null ? fmtWon(cp) : <span className="text-slate-300">—</span>}
                 </td>
-                <td className="px-3 py-2.5 text-right text-xs text-slate-500">
+                <td className="pl-2 pr-4 py-2.5 text-right text-xs text-slate-500">
                   {bp !== null ? fmtWon(bp) : <span className="text-slate-300">—</span>}
                 </td>
-                <td className="px-3 py-2.5 text-right text-xs font-semibold text-navy">
+                <td className="pl-2 pr-4 py-2.5 text-right text-xs font-semibold text-navy">
                   {displayValue !== null ? fmtWon(displayValue) : <span className="text-slate-300">—</span>}
                 </td>
-                <td className="px-3 py-2.5 text-right text-xs font-bold">
+                <td className="pl-2 pr-4 py-2.5 text-right text-xs font-bold">
                   {gainPct !== null ? (
                     <span className={isPos ? "text-emerald-600" : isNeg ? "text-red-600" : "text-slate-400"}>
                       {gainPct >= 0 ? "+" : ""}{gainPct.toFixed(2)}%
                     </span>
                   ) : <span className="text-slate-300">—</span>}
                 </td>
-                <td className="px-3 py-2.5 text-right text-xs font-bold">
+                <td className="pl-2 pr-4 py-2.5 text-right text-xs font-bold">
                   {gainAmt !== null ? (
                     <span className={isPos ? "text-emerald-600" : isNeg ? "text-red-600" : "text-slate-400"}>
                       {gainAmt >= 0 ? "+" : ""}{fmtWon(gainAmt)}
@@ -374,7 +385,7 @@ export function CorrelationHeatmap({ matrix, labels }: { matrix: number[][]; lab
           </tbody>
         </table>
       </div>
-      <div className="flex flex-wrap gap-4 text-xs font-semibold">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs font-semibold">
         {[
           { color: "bg-red-500",     label: "0.7 이상 · 고상관 (리스크 쏠림)" },
           { color: "bg-orange-400",  label: "0.3 ~ 0.7 · 중상관 (동조화 주의)" },
@@ -816,7 +827,7 @@ export function DistributionAndRiskSection({ data }: { data: PortfolioAnalysisRe
               <MetricCard label="연환산 변동성" value={fmtPct(quantResult.risk.volatility)} sub="연간 가격 흔들림 폭" />
               <MetricCard label="최대 낙폭(MDD)" value={fmtPct(Math.abs(quantResult.risk.mdd))} sub="최고점 대비 최악 하락률" />
               <MetricCard label="95% VaR" value={fmtWon(quantResult.risk.var95)} sub="월간 최대 손실 가능액" />
-              <MetricCard label="분산화 점수" value={fmt(quantResult.risk.diversificationScore)} sub="1에 가까울수록 동조화 강함" />
+              <MetricCard label="분산화 점수" value={fmt(quantResult.risk.diversificationScore)} sub="1에 가까울수록 분산효과 우수 (0에 가까울수록 동조화)" />
             </div>
             {quantResult.sensitivity.hhiWarning && (
               <p className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-800">

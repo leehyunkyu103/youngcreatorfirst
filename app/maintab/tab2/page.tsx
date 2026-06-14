@@ -32,9 +32,9 @@ const innerTabs: { id: InnerTab; label: string; icon: React.ReactNode }[] = [
   { id: "rebalancing", label: "리밸런싱(매도/유지)", icon: <RefreshCcw size={15} /> },
 ];
 
-const STORAGE_KEY = "samsung-vvip-tab2-inner-tab";
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
+
+const TAB2_SUBTAB_KEY = "tab2-active-subtab";
 
 export default function Tab2Page() {
   const [activeInnerTab, setActiveInnerTab] = useState<InnerTab>("holding");
@@ -100,15 +100,15 @@ export default function Tab2Page() {
   };
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage.getItem(TAB2_SUBTAB_KEY);
     if (stored === "holding" || stored === "risk" || stored === "technical" || stored === "options" || stored === "rebalancing") {
-      setActiveInnerTab(stored);
+      setActiveInnerTab(stored as InnerTab);
     }
   }, []);
 
   const selectInnerTab = (tab: InnerTab) => {
     setActiveInnerTab(tab);
-    window.localStorage.setItem(STORAGE_KEY, tab);
+    localStorage.setItem(TAB2_SUBTAB_KEY, tab);
   };
 
   return (
