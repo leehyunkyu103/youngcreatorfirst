@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   Sparkles, ShieldCheck, TrendingUp, Landmark, PiggyBank,
-  FileText, ArrowRight, BarChart3, RefreshCcw, AlertCircle,
+  FileText, BarChart3, AlertCircle,
   ChevronRight, CheckCircle2, X, Info, BadgeCheck, AlertTriangle, AlertOctagon
 } from "lucide-react";
 import { useCustomerContext } from "../CustomerContext";
@@ -164,7 +164,6 @@ function isUnsuitable(p: Product, c: Client): boolean {
   return RISK_LEVEL_MAP[p.riskGrade] < c.riskAppetite - 1;
 }
 
-// 적합 이유 개수 계산 (버킷 정렬용)
 function countGoodReasons(p: Product, c: Client, w: ReturnType<typeof calcWeights>): number {
   let count = 0;
   if (RISK_LEVEL_MAP[p.riskGrade] <= c.riskAppetite) count++;
@@ -173,6 +172,127 @@ function countGoodReasons(p: Product, c: Client, w: ReturnType<typeof calcWeight
   if (!p.isInstantRedeem && c.investmentPeriod >= 3) count++;
   if (p.isInstantRedeem && w.L > 0.2) count++;
   return count;
+}
+
+// 버킷 × 상품 × 고객 RRTTLLU 교차 메리트 동적 도출
+function getBucketMerit(p: Product, c: Client, w: ReturnType<typeof calcWeights>): { label: string; desc: string } | null {
+  const blended = getBlended(p);
+
+  switch (p.bucket) {
+    case "자본증식": {
+      const gap = blended - c.targetReturn;
+      if (blended === 0) return null;
+      if (gap > 0) {
+        return {
+          label: "목표 수익률 초과 달성 기대",
+          desc: `고객 목표수익률 ${c.targetReturn}%를 ${gap.toFixed(1)}%p 상회하는 통합 수익률(${blended.toFixed(1)}%)을 기록했습니다. 자본증식 버킷(${(w.G*100).toFixed(1)}%) 배분 목적인 적극적 성장을 직접 충족합니다.`,
+        };
+      } else {
+        return {
+          label: "자본증식 버킷 보완재로 활용",
+          desc: `통합 수익률(${blended.toFixed(1)}%)이 목표수익률(${c.targetReturn}%)에 다소 미치지 못하나, 포트폴리오 분산 측면에서 자본증식 버킷의 변동성을 낮추는 보완 역할을 합니다.`,
+        };
+      }
+    }
+
+    case "인컴창출": {
+      const isRetirementAge = c.age >= 50;
+      const isStabilityOriented = c.riskAppetite >= 3;
+      if (isRetirementAge && isStabilityOriented) {
+        return {
+          label: "은퇴 준비 구간 인컴 수익 확보",
+          desc: `${c.age}세 안정 지향 고객의 인컴창출 수요(버킷 비중 ${(w.I*100).toFixed(1)}%)에 부합합니다. 배당·이자 수익 기반의 정기 현금흐름으로 은퇴 후 생활비 충당을 지원합니다.`,
+        };
+      } else if (isRetirementAge) {
+        return {
+          label: "고령 고객 인컴 기반 구축",
+          desc: `${c.age}세 고객의 자산 안정화 구간에서 배당·이자 수익으로 정기적 인컴을 확보합니다. 성장성과 안정성을 동시에 추구하는 균형 전략입니다.`,
+        };
+      } else {
+        return {
+          label: "장기 인컴 기반 선제 확보",
+          desc: `현재 ${c.age}세 기준, 인컴창출 버킷(${(w.I*100).toFixed(1)}%)을 선제적으로 구축해 향후 안정적 현금흐름의 기반을 마련합니다.`,
+        };
+      }
+    }
+
+    case "위험헷지": {
+      if (p.id === "f8") {
+        return {
+          label: "금 자산 — 주식 하락기 역상관 방어",
+          desc: `금 선물은 주식과 낮은 상관관계를 가져 포트폴리오 하락 시 손실을 완충합니다. ${c.riskAppetite >= 3 ? `위험 회피 성향(${RISK_LABELS[c.riskAppetite]}) 고객에게 변동성 방어 역할이 특히 유효합니다.` : "공격적 포트폴리오의 급락 리스크를 헷지하는 보완재로 활용됩니다."}`,
+        };
+      } else if (p.id === "f6") {
+        return {
+          label: "달러 자산 분산 + 금리 방어",
+          desc: `달러 표시 단기채권으로 원화 자산 집중 리스크를 분산합니다. 달러 강세 시 환차익이 추가되며, 위험헷지 버킷(${(w.H*100).toFixed(1)}%) 배분 목적인 하락 방어를 실현합니다.`,
+        };
+      } else {
+        return {
+          label: "채권 혼합 — 포트폴리오 변동성 완충",
+          desc: `채권 65% 비중으로 주식 하락기 포트폴리오 전체 변동성을 낮춥니다. ${c.riskAppetite >= 3 ? "안정 지향 성향에 맞는" : "공격적 포트폴리오를 보완하는"} 방어 자산으로 위험헷지 버킷(${(w.H*100).toFixed(1)}%)을 충실히 담당합니다.`,
+        };
+      }
+    }
+
+    case "유동성": {
+      if (c.lumpSumTimepoint <= 1) {
+        return {
+          label: "1년 이내 목돈 수요 즉시 대응",
+          desc: `1년 이내 목돈 사용 계획이 있는 고객에게 즉시환매 구조가 핵심입니다. 시장 상황과 무관하게 필요 시 즉시 출금 가능해 유동성 버킷(${(w.L*100).toFixed(1)}%) 목적을 완전히 충족합니다.`,
+        };
+      } else if (c.lumpSumTimepoint <= 3) {
+        return {
+          label: "단기 자금 수요 대응 + 수익 병행",
+          desc: `${c.lumpSumTimepoint}년 내 자금 사용 계획을 고려해, 즉시환매로 유동성을 확보하면서 동시에 수익도 추구합니다. 유동성 버킷(${(w.L*100).toFixed(1)}%) 배분 목적에 적합합니다.`,
+        };
+      } else {
+        return {
+          label: "비상 유동성 버퍼 + 안정 수익",
+          desc: `비상금 및 현금흐름 수요(버킷 비중 ${(w.L*100).toFixed(1)}%)를 위한 즉시 출금 가능 안전 자산입니다. 자금 묶임 없이 포트폴리오 유동성을 항상 확보합니다.`,
+        };
+      }
+    }
+
+    case "절세": {
+      if (!c.isTaxTarget) {
+        if (p.taxType === "국내주식형") {
+          return {
+            label: "국내주식 비과세 — 과세소득 선제 관리",
+            desc: `현재 종소세 비대상이나, 국내주식 매매차익 비과세로 금융소득 누적을 억제합니다. 향후 금융소득이 2천만원을 초과할 경우를 대비한 선제적 절세 구조를 구축합니다.`,
+          };
+        }
+        return null;
+      }
+      switch (p.taxType) {
+        case "비과세연금":
+          return {
+            label: "종소세 완전 차단 — 최우선 절세 수단",
+            desc: `금융소득종합과세 대상 고객에게 10년 유지 시 보험차익이 완전 비과세됩니다. 절세 버킷(${(w.T*100).toFixed(1)}%) 배분액의 금융소득 합산을 원천 차단해 종소세 세율(최고 49.5%) 적용을 피합니다.`,
+          };
+        case "분리과세":
+          return {
+            label: "2억 한도 분리과세 — 종합과세 직접 차단",
+            desc: `매입액 2억원 한도로 15.4% 분리과세가 적용됩니다. 금융소득종합과세에 합산되지 않아 종소세 세율(최고 49.5%) 적용을 직접 차단하는 절세 버킷(${(w.T*100).toFixed(1)}%)의 핵심 수단입니다.`,
+          };
+        case "국내주식형":
+          return {
+            label: "국내주식 비과세로 과세소득 규모 절감",
+            desc: `국내주식 매매차익이 비과세되어 금융소득 합산액을 줄입니다. 종소세 대상 고객의 과세 금융소득 규모를 낮춰 종합과세 구간을 하향 조정하는 간접 절세 효과가 있습니다.`,
+          };
+        case "소득공제":
+          return {
+            label: "투자금 10% 소득공제 — 세금 직접 환급",
+            desc: `투자금의 10%(최대 300만원)를 소득공제받아 근로·사업소득세가 직접 환급됩니다. 금융소득 절세 외 소득세도 동시에 절감하는 이중 절세 효과로 절세 버킷(${(w.T*100).toFixed(1)}%)을 최대 활용합니다.`,
+          };
+        default:
+          return null;
+      }
+    }
+
+    default:
+      return null;
+  }
 }
 
 type FitReason = { label: string; desc: string; type: "good"|"caution"|"bad" };
@@ -189,135 +309,61 @@ function analyzeProductFit(p: Product, c: Client, w: ReturnType<typeof calcWeigh
   const unsuitable = isUnsuitable(p, c);
   const reasons: FitReason[] = [];
   const upsides: UpsideItem[] = [];
-
   const productRiskAppetite = RISK_LEVEL_MAP[p.riskGrade] ?? 3;
   const clientLabel = RISK_LABELS[c.riskAppetite] ?? "중위험";
   const productGradeLabel = GRADE_LABELS[p.riskGrade] ?? "보통";
   const riskGradeMap: Record<number,string> = {1:"매우높은위험",2:"높은위험",3:"다소높은위험",4:"보통위험",5:"낮은위험",6:"매우낮은위험"};
 
   if (unsuitable) {
-    // 부적합 이유
-    reasons.push({
-      label: "위험성향 불일치",
-      desc: `고객 성향은 ${clientLabel}(${c.riskAppetite}단계)이나, 해당 상품은 ${riskGradeMap[p.riskGrade]}(${p.riskGrade}등급)입니다. 고객 허용 위험 수준보다 ${c.riskAppetite - productRiskAppetite + 1}단계 이상 높아 RRTTLLU 기준 적합 범위를 벗어납니다.`,
-      type: "bad",
-    });
-
+    reasons.push({ label:"위험성향 불일치", desc:`고객 성향은 ${clientLabel}(${c.riskAppetite}단계)이나, 해당 상품은 ${riskGradeMap[p.riskGrade]}(${p.riskGrade}등급)입니다. 고객 허용 위험 수준보다 ${c.riskAppetite - productRiskAppetite + 1}단계 이상 높아 RRTTLLU 기준 적합 범위를 벗어납니다.`, type:"bad" });
     if (!p.isInstantRedeem && c.investmentPeriod < 3) {
-      reasons.push({
-        label: "환매 조건 주의",
-        desc: `즉시환매가 불가한 상품입니다. 고객의 투자기간(${c.investmentPeriod}년) 내 자금이 필요할 경우 출금이 어려울 수 있습니다.`,
-        type: "bad",
-      });
+      reasons.push({ label:"환매 조건 주의", desc:`즉시환매가 불가한 상품입니다. 고객의 투자기간(${c.investmentPeriod}년) 내 자금이 필요할 경우 출금이 어려울 수 있습니다.`, type:"bad" });
     }
-
     if (c.isTaxTarget && p.taxType==="해외주식형") {
-      reasons.push({
-        label: "절세 효과 제한",
-        desc: "종소세 대상 고객에게 해외주식형 펀드의 배당소득세(15.4%)는 금융소득 합산 부담을 높일 수 있습니다.",
-        type: "caution",
-      });
+      reasons.push({ label:"절세 효과 제한", desc:"종소세 대상 고객에게 해외주식형 펀드의 배당소득세(15.4%)는 금융소득 합산 부담을 높일 수 있습니다.", type:"caution" });
     }
-
-    // 부적합 상품이지만 편입 시 기대 효과
     const blended = getBlended(p);
     if (blended > 0) {
-      upsides.push({
-        label: "높은 수익 잠재력",
-        desc: `1년 수익률 +${p.return1Y}%${p.return3Y?`, 3년 수익률 +${p.return3Y}%`:""}로 공격적 성장을 추구합니다. 위험을 감수하는 만큼 장기 관점에서 포트폴리오 수익률을 끌어올리는 역할을 기대할 수 있습니다.`,
-      });
+      upsides.push({ label:"높은 수익 잠재력", desc:`1년 수익률 +${p.return1Y}%${p.return3Y?`, 3년 수익률 +${p.return3Y}%`:""}로 공격적 성장을 추구합니다. 위험을 감수하는 만큼 장기 관점에서 포트폴리오 수익률을 끌어올리는 역할을 기대할 수 있습니다.` });
     }
-
     if (p.bucket === w.topBucket) {
-      upsides.push({
-        label: "핵심 버킷 보완",
-        desc: `고객의 최우선 배분 버킷(${w.topBucket})에 속해 있어, 위험을 인지하고 편입할 경우 포트폴리오 전략 방향과 일치합니다.`,
-      });
+      upsides.push({ label:"핵심 버킷 보완", desc:`고객의 최우선 배분 버킷(${w.topBucket})에 속해 있어, 위험을 인지하고 편입할 경우 포트폴리오 전략 방향과 일치합니다.` });
     }
-
     if (p.taxType==="해외주식형") {
-      upsides.push({
-        label: "해외주식 분류과세",
-        desc: "해외주식 매매차익에 22% 분류과세가 적용되어, 금융소득종합과세 합산 없이 별도 과세됩니다.",
-      });
+      upsides.push({ label:"해외주식 분류과세", desc:"해외주식 매매차익에 22% 분류과세가 적용되어, 금융소득종합과세 합산 없이 별도 과세됩니다." });
     }
-
     if (p.type === "랩어카운트") {
-      upsides.push({
-        label: "전문 운용사 액티브 관리",
-        desc: "전문 운용사가 직접 종목을 선별·편입·편출하여 시장 상황에 능동적으로 대응합니다. 개별 주식 직접 투자 대비 분산 효과도 있습니다.",
-      });
+      upsides.push({ label:"전문 운용사 액티브 관리", desc:"전문 운용사가 직접 종목을 선별·편입·편출하여 시장 상황에 능동적으로 대응합니다. 개별 주식 직접 투자 대비 분산 효과도 있습니다." });
     }
-
   } else {
-    // 적합 이유
     if (productRiskAppetite <= c.riskAppetite) {
-      reasons.push({
-        label: "위험성향 적합",
-        desc: `고객 성향(${clientLabel}) 대비 ${productGradeLabel} 위험 상품으로 RRTTLLU 허용 범위 내에 있습니다.`,
-        type: "good",
-      });
+      reasons.push({ label:"위험성향 적합", desc:`고객 성향(${clientLabel}) 대비 ${productGradeLabel} 위험 상품으로 RRTTLLU 허용 범위 내에 있습니다.`, type:"good" });
     } else {
-      reasons.push({
-        label: "위험성향 주의",
-        desc: `고객 성향보다 위험도가 한 단계 높은 상품입니다. 편입 전 고객의 동의와 충분한 설명이 필요합니다.`,
-        type: "caution",
-      });
+      reasons.push({ label:"위험성향 주의", desc:`고객 성향보다 위험도가 한 단계 높은 상품입니다. 편입 전 고객의 동의와 충분한 설명이 필요합니다.`, type:"caution" });
     }
-
     if (p.bucket === w.topBucket) {
-      reasons.push({
-        label: "핵심 버킷 충족",
-        desc: `고객의 최우선 배분 버킷(${w.topBucket})과 일치합니다. 포트폴리오 핵심 자산으로 편입이 적합합니다.`,
-        type: "good",
-      });
+      reasons.push({ label:"핵심 버킷 충족", desc:`고객의 최우선 배분 버킷(${w.topBucket})과 일치합니다. 포트폴리오 핵심 자산으로 편입이 적합합니다.`, type:"good" });
     }
-
     if (c.isTaxTarget && (p.taxType==="비과세연금"||p.taxType==="분리과세")) {
-      reasons.push({
-        label: "종소세 절감 — 최우선 절세 효과",
-        desc: `금융소득종합과세 대상 고객에게 ${p.taxType} 상품으로 금융소득 합산을 직접 차단합니다.`,
-        type: "good",
-      });
+      reasons.push({ label:"종소세 절감 — 최우선 절세 효과", desc:`금융소득종합과세 대상 고객에게 ${p.taxType} 상품으로 금융소득 합산을 직접 차단합니다.`, type:"good" });
     } else if (c.isTaxTarget && p.taxType==="국내주식형") {
-      reasons.push({
-        label: "국내주식 비과세 혜택",
-        desc: "국내주식 매매차익 비과세로 금융소득 규모를 줄여 종소세 부담을 완화합니다.",
-        type: "good",
-      });
+      reasons.push({ label:"국내주식 비과세 혜택", desc:"국내주식 매매차익 비과세로 금융소득 규모를 줄여 종소세 부담을 완화합니다.", type:"good" });
     } else if (c.isTaxTarget && p.taxType==="소득공제") {
-      reasons.push({
-        label: "소득공제 혜택",
-        desc: "투자금 10% 소득공제(최대 300만원)로 근로소득세 직접 환급 효과가 있습니다.",
-        type: "good",
-      });
+      reasons.push({ label:"소득공제 혜택", desc:"투자금 10% 소득공제(최대 300만원)로 근로소득세 직접 환급 효과가 있습니다.", type:"good" });
     } else if (c.isTaxTarget && p.taxType==="해외주식형") {
-      reasons.push({
-        label: "절세 효과 제한적",
-        desc: "해외주식형 펀드는 배당소득세 15.4%가 적용되어 종소세 대상 고객의 금융소득 합산 부담이 있습니다.",
-        type: "caution",
-      });
+      reasons.push({ label:"절세 효과 제한적", desc:"해외주식형 펀드는 배당소득세 15.4%가 적용되어 종소세 대상 고객의 금융소득 합산 부담이 있습니다.", type:"caution" });
+    }
+    if (!p.isInstantRedeem && c.investmentPeriod >= 3) {
+      reasons.push({ label:"장기 투자 적합", desc:`투자기간 ${c.investmentPeriod}년으로 즉시환매 불가 상품의 보유 조건에 충분히 부합합니다.`, type:"good" });
+    } else if (!p.isInstantRedeem && c.investmentPeriod < 3) {
+      reasons.push({ label:"환매 조건 주의", desc:`즉시환매가 불가한 상품입니다. 투자기간(${c.investmentPeriod}년) 내 자금이 필요할 경우 출금이 어려울 수 있습니다.`, type:"caution" });
+    } else if (p.isInstantRedeem && w.L > 0.2) {
+      reasons.push({ label:"유동성 수요 대응", desc:`즉시환매 가능 상품으로 고객의 유동성 수요(버킷 비중 ${(w.L*100).toFixed(0)}%)에 효과적으로 대응합니다.`, type:"good" });
     }
 
-    if (!p.isInstantRedeem && c.investmentPeriod >= 3) {
-      reasons.push({
-        label: "장기 투자 적합",
-        desc: `투자기간 ${c.investmentPeriod}년으로 즉시환매 불가 상품의 보유 조건에 충분히 부합합니다.`,
-        type: "good",
-      });
-    } else if (!p.isInstantRedeem && c.investmentPeriod < 3) {
-      reasons.push({
-        label: "환매 조건 주의",
-        desc: `즉시환매가 불가한 상품입니다. 투자기간(${c.investmentPeriod}년) 내 자금이 필요할 경우 출금이 어려울 수 있습니다.`,
-        type: "caution",
-      });
-    } else if (p.isInstantRedeem && w.L > 0.2) {
-      reasons.push({
-        label: "유동성 수요 대응",
-        desc: `즉시환매 가능 상품으로 고객의 유동성 수요(버킷 비중 ${(w.L*100).toFixed(0)}%)에 효과적으로 대응합니다.`,
-        type: "good",
-      });
-    }
+    // 버킷 × 상품 × 고객 RRTTLLU 교차 메리트
+    const merit = getBucketMerit(p, c, w);
+    if (merit) reasons.push({ label: merit.label, desc: merit.desc, type: "good" });
   }
 
   const bucketW = p.bucket==="자본증식"?w.G:p.bucket==="인컴창출"?w.I:p.bucket==="위험헷지"?w.H:p.bucket==="유동성"?w.L:w.T;
@@ -480,40 +526,26 @@ export default function Tab5Page() {
 
   const weights = useMemo(() => rrttlluReady ? calcWeights(client) : null, [client,rrttlluReady]);
 
-  const existingPortfolio = useMemo(() => {
-    if (!portfolioData?.enrichedAssets?.length) return null;
-    const total = portfolioData.enrichedAssets.reduce((s,a)=>s+(a.current_value??a.amount??0),0);
-    if (!total) return null;
-    const map: Partial<Record<BucketType,number>> = {};
-    for (const a of portfolioData.enrichedAssets) {
-      const bucket = ASSET_CLASS_TO_BUCKET[a.asset_class]??"자본증식";
-      map[bucket] = (map[bucket]??0) + (a.current_value??a.amount??0)/total;
-    }
-    return { weights:map, total };
-  }, [portfolioData]);
-
   const bucketAllProducts = useMemo(() => {
     if (!weights) return null;
     const scored = PRODUCTS
       .filter(p => !(p.isHighIncomeOnly&&!client.isHighIncomeWorker))
       .map(p => ({ ...p, score: Math.round(calcScore(p,client,weights,PRODUCTS)*10)/10 }));
-
-    // 적합 상품 상위, 부적합 상품 하위 정렬 (같은 그룹 내에서는 good reason 수 → score 순)
-    const sorted = [...scored].sort((a, b) => {
-      const aUnsuitable = isUnsuitable(a, client);
-      const bUnsuitable = isUnsuitable(b, client);
-      if (aUnsuitable !== bUnsuitable) return aUnsuitable ? 1 : -1;
-      const goodDiff = countGoodReasons(b, client, weights) - countGoodReasons(a, client, weights);
-      if (goodDiff !== 0) return goodDiff;
-      return b.score - a.score;
-    });
-
-    const result: Partial<Record<BucketType,typeof sorted>> = {};
+    const result: Partial<Record<BucketType,typeof scored>> = {};
     for (const bucket of BUCKETS) {
-      const list = sorted.filter(p=>p.bucket===bucket);
+      const list = scored
+        .filter(p => p.bucket === bucket)
+        .sort((a, b) => {
+          const aUnsuitable = isUnsuitable(a, client);
+          const bUnsuitable = isUnsuitable(b, client);
+          if (aUnsuitable !== bUnsuitable) return aUnsuitable ? 1 : -1;
+          const goodDiff = countGoodReasons(b, client, weights) - countGoodReasons(a, client, weights);
+          if (goodDiff !== 0) return goodDiff;
+          return b.score - a.score;
+        });
       result[bucket] = list.length > 0 ? list : PRODUCTS
-        .filter(p=>p.bucket===bucket&&!(p.isHighIncomeOnly&&!client.isHighIncomeWorker))
-        .map(p=>({...p, score: Math.round(calcScore(p,client,weights,PRODUCTS)*10)/10}));
+        .filter(p => p.bucket === bucket && !(p.isHighIncomeOnly&&!client.isHighIncomeWorker))
+        .map(p => ({...p, score: Math.round(calcScore(p,client,weights,PRODUCTS)*10)/10}));
     }
     return result;
   }, [client,weights]);
@@ -550,14 +582,12 @@ export default function Tab5Page() {
   };
 
   const selectedProducts = PRODUCTS.filter(p=>selectedIds.includes(p.id));
-  const totalAssetValue = existingPortfolio?.total??0;
   const customerName = selectedCustomerProfile.name||selectedCustomerProfile.fallbackName||"고객";
 
   return (
     <>
       {modalProduct && <ProductModal product={modalProduct} onClose={()=>setModalProduct(null)}/>}
 
-      {/* 부적합 상품 경고 모달 */}
       {unsuitableWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden">
@@ -579,9 +609,7 @@ export default function Tab5Page() {
                   고객 성향은 <strong>{RISK_LABELS[client.riskAppetite]}</strong>이나, 해당 상품은 <strong>{RISK_GRADE_LABEL[unsuitableWarning.riskGrade]}</strong> 등급입니다. 고객 성향보다 위험도가 2단계 이상 높은 상품입니다.
                 </p>
               </div>
-              <p className="text-sm font-semibold text-slate-600 leading-6">
-                고객에게 충분한 설명과 동의를 받은 후 진행하시겠습니까?
-              </p>
+              <p className="text-sm font-semibold text-slate-600 leading-6">고객에게 충분한 설명과 동의를 받은 후 진행하시겠습니까?</p>
               <div className="grid grid-cols-2 gap-3">
                 <button type="button" onClick={()=>setUnsuitableWarning(null)}
                   className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 transition">
@@ -609,79 +637,42 @@ export default function Tab5Page() {
 
       <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
         <div className="mb-5 flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-samsung"><RefreshCcw size={18}/></div>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-samsung"><BarChart3 size={18}/></div>
           <div>
-            <p className="text-xs font-bold uppercase tracking-normal text-slate-500">RRTTLLU 기반 리밸런싱</p>
-            <h2 className="text-lg font-bold text-navy">{customerName}님 자산 배분 전환</h2>
-            {totalAssetValue>0 && <p className="mt-0.5 text-xs text-slate-400">기존 포트폴리오 총액: <span className="font-bold text-navy">{fmtWon(totalAssetValue)}</span></p>}
+            <p className="text-xs font-bold uppercase tracking-normal text-slate-500">성향 기반 배분</p>
+            <h2 className="text-lg font-bold text-navy">{customerName}님 맞춤 자산 배분 가이드</h2>
+            <p className="mt-0.5 text-[10px] text-slate-400">* 투자가능자산 기준으로 산출된 배분 가이드입니다</p>
           </div>
         </div>
-        <div className="grid gap-8 lg:grid-cols-[1fr_40px_1fr]">
-          <div>
-            <p className="mb-3 text-sm font-bold text-slate-500">기존 포트폴리오</p>
-            {existingPortfolio ? (
-              <div className="space-y-3">
-                {BUCKETS.map(bucket=>{
-                  const w = existingPortfolio.weights[bucket]??0;
-                  const cfg = BUCKET_CFG[bucket];
-                  return (
-                    <div key={bucket}>
-                      <div className="mb-1 flex items-center justify-between text-xs font-semibold">
-                        <span className={`flex items-center gap-1 ${cfg.color}`}>{cfg.icon}{bucket}</span>
-                        <div className="flex items-center gap-2">
-                          {w>0&&totalAssetValue>0&&<span className="text-slate-400">{fmtWon(totalAssetValue*w)}</span>}
-                          <span className={w>0?"font-bold text-navy":"text-slate-300"}>{(w*100).toFixed(1)}%</span>
-                        </div>
-                      </div>
-                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                        <div className="h-full rounded-full" style={{width:`${w*100}%`,backgroundColor:cfg.barColor}}/>
-                      </div>
+        {rrttlluReady&&weights ? (
+          <div className="space-y-3">
+            {BUCKETS.map(bucket=>{
+              const w = getBucketWeight(bucket);
+              const cfg = BUCKET_CFG[bucket];
+              const amt = client.investableAssets * w;
+              return (
+                <div key={bucket}>
+                  <div className="mb-1 flex items-center justify-between text-xs font-semibold">
+                    <span className={`flex items-center gap-1 ${cfg.color}`}>{cfg.icon}{bucket}</span>
+                    <div className="flex items-center gap-2">
+                      {amt>0&&<span className="text-slate-400">{fmtWon(amt)}</span>}
+                      <span className="font-bold text-navy">{(w*100).toFixed(1)}%</span>
                     </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center">
-                <PiggyBank size={24} className="text-slate-300"/>
-                <p className="text-sm font-semibold text-slate-400">TAB2에서 자산을 입력하고<br/>분석 실행을 눌러주세요</p>
-              </div>
-            )}
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full" style={{width:`${w*100}%`,backgroundColor:cfg.barColor}}/>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-400">{cfg.desc}</p>
+                </div>
+              );
+            })}
           </div>
-          <div className="flex items-center justify-center">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-samsung text-white shadow-sm"><ArrowRight size={18}/></div>
+        ) : (
+          <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center">
+            <AlertCircle size={24} className="text-slate-300"/>
+            <p className="text-sm font-semibold text-slate-400">TAB1에서 RRTTLLU를<br/>입력해주세요</p>
           </div>
-          <div>
-            <p className="mb-3 text-sm font-bold text-samsung">신규 포트폴리오 (RRTTLLU 기반)</p>
-            {rrttlluReady&&weights ? (
-              <div className="space-y-3">
-                {BUCKETS.map(bucket=>{
-                  const w = getBucketWeight(bucket);
-                  const cfg = BUCKET_CFG[bucket];
-                  return (
-                    <div key={bucket}>
-                      <div className="mb-1 flex items-center justify-between text-xs font-semibold">
-                        <span className={`flex items-center gap-1 ${cfg.color}`}>{cfg.icon}{bucket}</span>
-                        <div className="flex items-center gap-2">
-                          {w>0&&totalAssetValue>0&&<span className="text-slate-400">{fmtWon(totalAssetValue*w)}</span>}
-                          <span className="font-bold text-navy">{(w*100).toFixed(1)}%</span>
-                        </div>
-                      </div>
-                      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-                        <div className="h-full rounded-full" style={{width:`${w*100}%`,backgroundColor:cfg.barColor}}/>
-                      </div>
-                      <p className="mt-0.5 text-xs text-slate-400">{cfg.desc}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-center">
-                <AlertCircle size={24} className="text-slate-300"/>
-                <p className="text-sm font-semibold text-slate-400">TAB1에서 RRTTLLU를<br/>입력해주세요</p>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
         {rrttlluReady&&client.isTaxTarget&&(
           <div className="mt-5 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
             <p className="text-xs font-bold text-orange-700">⚠️ 금융소득종합과세 대상 고객</p>
@@ -712,7 +703,7 @@ export default function Tab5Page() {
               const offset = getOffset(bucket);
               const shown = allProds.slice(offset, offset+2);
               const bw = getBucketWeight(bucket);
-              const bucketAmt = totalAssetValue*bw;
+              const bucketAmt = client.investableAssets * bw;
               return (
                 <div key={bucket} className={`rounded-xl border p-5 ${cfg.border} ${cfg.bg}`}>
                   <div className="mb-4 flex items-center justify-between">
@@ -822,7 +813,6 @@ export default function Tab5Page() {
         </section>
       )}
 
-      {/* RRTTLLU 맞춤 효과 분석 패널 */}
       {selectedProducts.length>0 && rrttlluReady && weights && (
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
           <div className="mb-5 flex items-center gap-3">
@@ -861,7 +851,6 @@ export default function Tab5Page() {
 
             return (
               <div className="space-y-4">
-                {/* 상품 헤더 */}
                 <div className={`rounded-xl border p-4 ${unsuitable?"bg-red-50 border-red-200":cfg.bg+" "+cfg.border}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -880,7 +869,6 @@ export default function Tab5Page() {
                   </div>
                 </div>
 
-                {/* 적합/부적합 이유 */}
                 <div className={`rounded-xl border p-4 ${unsuitable?"border-red-100 bg-red-50":"border-slate-100 bg-slate-50"}`}>
                   <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-600">
                     {unsuitable
@@ -907,7 +895,6 @@ export default function Tab5Page() {
                   </div>
                 </div>
 
-                {/* 부적합 상품 편입 시 기대 수익 */}
                 {unsuitable && upsides.length>0 && (
                   <div className="rounded-xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center gap-2 mb-3">
@@ -928,7 +915,6 @@ export default function Tab5Page() {
                   </div>
                 )}
 
-                {/* 편입 권고 금액 */}
                 <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                   <p className="mb-3 text-xs font-bold text-slate-600 uppercase tracking-wide">편입 권고 금액</p>
                   <div className="grid grid-cols-2 gap-3">
